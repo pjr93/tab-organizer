@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Adaptive Grid Groups with Drag, Drop, New Groups & Intra-group Reorder</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f8f9fb;
+            margin: 0;
+        }
+
+        h2 {
+            margin: 20px 0 0 24px;
+        }
+
+        #parent-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            /* max 3 columns */
+            gap: 16px;
+            padding: 32px;
+        }
+
+        .child-grid {
+            background: #fff;
+            border: 2px solid #666;
+            border-radius: 8px;
+            min-width: 180px;
+            min-height: 80px;
+            box-shadow: 0 2px 6px #0001;
+            padding: 16px 10px 16px 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            position: relative;
+            transition: box-shadow .16s, border-color .16s;
+        }
+
+        .child-grid.dragover {
+            border-color: #2196F3;
+            box-shadow: 0 0 0 3px #cce7ff;
+        }
+
+        .grid-item {
+            background: #59c96e;
+            color: white;
+            border-radius: 6px;
+            min-width: 70px;
+            min-height: 37px;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            position: relative;
+            cursor: move;
+            user-select: none;
+            font-weight: bold;
+            gap: 6px;
+        }
+
+        .grid-item.dragging {
+            opacity: 0.5;
+        }
+
+        .delete-btn {
+            display: none;
+            position: absolute;
+            top: 3px;
+            right: 7px;
+            background: #e53e3e;
+            border: none;
+            color: #fff;
+            font-weight: bold;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 15px;
+            padding: 0;
+        }
+
+        .grid-item:hover .delete-btn {
+            display: block;
+        }
+
+        .group-delete-btn {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 22px;
+            height: 22px;
+            background: #e53e3e;
+            border: none;
+            color: white;
+            font-weight: bold;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 20px;
+            user-select: none;
+            display: none;
+            /* Hide by default */
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            z-index: 10;
+            transition: opacity 0.2s ease;
+        }
+
+        .group-delete-btn:hover {
+            background: #b32b2b;
+        }
+
+        .child-grid:hover>.group-delete-btn {
+            display: flex;
+            /* Show on group hover */
+            opacity: 1;
+        }
+
+
+        /* Placeholder for reordering */
+        .placeholder {
+            box-sizing: border-box;
+            min-height: 37px;
+            width: 70px;
+            margin: 4px 0;
+            background: #90caf9;
+            border: 2px dashed #2196F3;
+            border-radius: 6px;
+        }
+
+        /* Drop indicator shown when dragging outside all groups */
+        #drop-indicator {
+            position: fixed;
+            pointer-events: none;
+            z-index: 90;
+            background: #2196F3cc;
+            color: #fff;
+            border-radius: 8px;
+            font-weight: bold;
+            padding: 10px 24px;
+            font-size: 18px;
+            box-shadow: 0 4px 28px #2196F366;
+            display: none;
+        }
+
+        /* Overlay to catch drops outside groups */
+        #outside-overlay {
+            display: none;
+            position: fixed;
+            z-index: 80;
+            left: 0;
+            top: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(33, 150, 243, 0.08);
+            pointer-events: none;
+        }
+
+        #outside-overlay.active {
+            display: block;
+            pointer-events: all;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Adaptive Board with Multi-Group & Intra-Group Reordering</h2>
+    <button style="margin: 14px 0 0 26px;" onclick="addDemoItem()">Add Random Item to First Group</button>
+
+    <div id="parent-grid"></div>
+    <div id="outside-overlay"></div>
+    <div id="drop-indicator">Drop here to create a new group</div>
+
+    <script>
+        const parentGrid = document.getElementById('parent-grid');
+        const dropIndicator = document.getElementById('drop-indicator');
+        const outsideOverlay = document.getElementById('outside-overlay');
+
+        let draggedItem = null;
+        let draggedText = null;
+        let placeholder = null;
+
+        // Initial groups with sample items
+        let groupData = [
+            ["Alpha", "Beta"],
+            ["Gamma", "Delta", "Epsilon"],
+            ["Zeta"],
+        ];
+
+        function createGroup(items = [], idx) {
+            const group = document.createElement('div');
+            group.className = 'child-grid';
+            group.dataset.group = idx;
+
+            // Clear placeholder helper
+            function clearPlaceholder() {
+                if (placeholder && placeholder.parentElement) {
+                    placeholder.parentElement.removeChild(placeholder);
+                    placeholder = null;
+                }
+            }
+
+            // Helper: Find element after which to drop the dragged item (vertical logic adapted for flex wrap)
+            function getDragAfterElement(container, x, y) {
+                const draggableElements = [...container.querySelectorAll('.grid-item:not(.dragging)')];
+
+                // Because this layout wraps horizontally, use x position to decide insertion point in a row
+                let closest = { offset: Number.POSITIVE_INFINITY, element: null };
+                for (const child of draggableElements) {
+                    const box = child.getBoundingClientRect();
+
+                    // Calculate horizontal distance from pointer to center of the child element
+                    const offset = x - (box.left + box.width / 2);
+
+                    // We want the closest element before the pointer (offset > 0 means pointer right of center, so consider negative offset)
+                    if (offset < 0 && Math.abs(offset) < closest.offset) {
+                        closest = { offset: Math.abs(offset), element: child };
+                    }
+                }
+                return closest.element;
+            }
+
+            group.addEventListener('dragover', e => {
+                e.preventDefault();
+                group.classList.add('dragover');
+                if (!draggedItem) return;
+
+                // Find the element after which the placeholder should be inserted
+                const afterElement = getDragAfterElement(group, e.clientX, e.clientY);
+
+                clearPlaceholder();
+                placeholder = document.createElement('div');
+                placeholder.classList.add('placeholder');
+                placeholder.style.minHeight = draggedItem.offsetHeight + 'px';
+                placeholder.style.width = draggedItem.offsetWidth + 'px';
+
+                if (afterElement == null) {
+                    // Append placeholder at end
+                    group.appendChild(placeholder);
+                } else {
+                    group.insertBefore(placeholder, afterElement);
+                }
+            });
+
+            group.addEventListener('dragleave', e => {
+                // Clear placeholder only if leaving the group container (not when moving within)
+                if (e.relatedTarget && !group.contains(e.relatedTarget)) {
+                    group.classList.remove('dragover');
+                    clearPlaceholder();
+                }
+            });
+
+            group.addEventListener('drop', e => {
+                e.preventDefault();
+                group.classList.remove('dragover');
+
+                if (draggedItem && draggedText) {
+                    // Remove old reference first
+                    removeFromGroupData(draggedText);
+
+                    // Calculate insertion index based on placeholder position
+                    let newIndex = group.children.length; // default to end
+                    if (placeholder && placeholder.parentElement === group) {
+                        newIndex = Array.from(group.children).indexOf(placeholder);
+                    }
+
+                    clearPlaceholder();
+
+                    // Insert draggedText in groupData at newIndex
+                    groupData[idx].splice(newIndex, 0, draggedText);
+
+                    renderBoard();
+                }
+                hideDropIndicator();
+                deactivateOutsideOverlay();
+            });
+
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'group-delete-btn';
+            deleteBtn.textContent = '×';
+            deleteBtn.title = "Delete this group";
+
+            // Delete handler: remove group and rerender
+            deleteBtn.addEventListener('click', e => {
+                e.stopPropagation(); // Prevent triggering drag or other handlers
+                groupData.splice(idx, 1); // Remove group by index
+                renderBoard();
+            });
+
+            group.appendChild(deleteBtn);
+
+            // Populate grid items
+            for (const txt of items) group.appendChild(createGridItem(txt));
+
+            return group;
+        }
+
+        function createGridItem(text) {
+            const item = document.createElement('div');
+            item.className = 'grid-item';
+            item.textContent = text;
+            item.draggable = true;
+
+            const btn = document.createElement('button');
+            btn.className = 'delete-btn';
+            btn.textContent = '×';
+            btn.onclick = e => {
+                e.stopPropagation();
+                removeFromGroupData(text);
+                renderBoard();
+            };
+            item.appendChild(btn);
+
+            item.addEventListener('dragstart', e => {
+                draggedItem = item;
+                draggedText = text;
+                item.classList.add('dragging');
+
+                // Hide dragged element after dragstart for better UX
+                setTimeout(() => {
+                    item.style.display = 'none';
+                }, 0);
+
+                // Listen globally to track cursor outside groups
+                document.addEventListener('dragover', onDragAnywhere);
+            });
+
+            item.addEventListener('dragend', e => {
+                draggedItem = null;
+                draggedText = null;
+                item.style.display = '';
+                item.classList.remove('dragging');
+                hideDropIndicator();
+                deactivateOutsideOverlay();
+                clearPlaceholder();
+                document.removeEventListener('dragover', onDragAnywhere);
+            });
+
+            return item;
+        }
+
+        function removeFromGroupData(text) {
+            for (const g of groupData) {
+                const i = g.indexOf(text);
+                if (i !== -1) {
+                    g.splice(i, 1);
+                    break;
+                }
+            }
+        }
+
+        // Called on document dragover to detect if cursor is outside all groups
+        function onDragAnywhere(ev) {
+            // Are we over any group?
+            const grids = Array.from(document.elementsFromPoint(ev.clientX, ev.clientY))
+                .filter(e => e.classList && e.classList.contains('child-grid'));
+
+            if (grids.length === 0 && draggedItem) {
+                showDropIndicator(ev.clientX, ev.clientY);
+                activateOutsideOverlay();
+            } else {
+                hideDropIndicator();
+                deactivateOutsideOverlay();
+            }
+        }
+
+        function showDropIndicator(x, y) {
+            dropIndicator.style.display = 'block';
+            dropIndicator.style.left = (x + 14) + 'px';
+            dropIndicator.style.top = (y - 28) + 'px';
+        }
+
+        function hideDropIndicator() {
+            dropIndicator.style.display = 'none';
+        }
+
+        function activateOutsideOverlay() {
+            outsideOverlay.classList.add('active');
+        }
+
+        function deactivateOutsideOverlay() {
+            outsideOverlay.classList.remove('active');
+        }
+
+        // Drop on outside overlay creates a new group for the dragged item
+        outsideOverlay.addEventListener('dragenter', e => { e.preventDefault(); });
+        outsideOverlay.addEventListener('dragover', e => { e.preventDefault(); });
+        outsideOverlay.addEventListener('drop', function (ev) {
+            ev.preventDefault();
+            if (!draggedItem || !draggedText) return;
+            removeFromGroupData(draggedText);
+            groupData.push([draggedText]);
+            renderBoard();
+            hideDropIndicator();
+            deactivateOutsideOverlay();
+        });
+
+        // Render all groups and their items
+        function renderBoard() {
+            parentGrid.innerHTML = '';
+            groupData = groupData.filter(g => g.length); // remove empty groups
+            groupData.forEach((items, idx) => parentGrid.appendChild(createGroup(items, idx)));
+        }
+
+        // Add a random demo item to first group (for testing)
+        window.addDemoItem = function () {
+            if (groupData.length === 0) groupData.push([]);
+            groupData[0].push('Random' + Math.floor(Math.random() * 90 + 10));
+            renderBoard();
+        };
+
+        // Initial render
+        renderBoard();
+    </script>
+</body>
+
+</html>
