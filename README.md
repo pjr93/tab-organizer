@@ -1,6 +1,6 @@
 # Greetings
 
-Welcome to a simple tab organizer! This app reflects the state of windows and tabs in your browser session, allowing you to manage your windows and tabs easier. 
+Welcome to a simple tab organizer! This app reflects the state of windows and tabs in your browser session, allowing you to manage your windows and tabs easier. In other words, whatever tabs and windows are opened in your browser will automatically appear in the main app
 
 # Install
 
