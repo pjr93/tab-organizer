@@ -1,0 +1,224 @@
+        body {
+            font-family: sans-serif;
+            background: #202020;
+            color: white;
+            margin: 0;
+        }
+
+        h2 {
+            margin: 20px 0 0 24px;
+        }
+
+        #parent-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            padding: 32px;
+        }
+
+        .child-grid {
+            background: black;
+            border: 2px solid #666;
+            border-radius: 8px;
+            min-width: 180px;
+            min-height: 35px;
+            box-shadow: 0 2px 6px #0001;
+            padding: 16px 10px 16px 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            position: relative;
+            transition: box-shadow 0.16s, border-color 0.16s;
+        }
+
+        .child-grid.dragover {
+            border-color: #2196F3;
+            box-shadow: 0 0 0 3px #cce7ff;
+        }
+
+        .grid-item {
+            height: 30px;
+            min-height: 30px;
+            padding: 6px 40px 6px 12px;
+            /* Add extra right padding (e.g. 40px) for delete button */
+            font-size: 14px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            position: relative;
+            cursor: move;
+            user-select: none;
+            gap: 6px;
+            box-sizing: border-box;
+            border-radius: 2px;
+            background: rgb(37, 37, 37);
+        }
+
+        .grid-item.dragging {
+            opacity: 0.5;
+        }
+
+        .delete-btn {
+            display: none;
+            /* Fully hidden by default */
+            position: absolute;
+            top: 50%;
+            right: 6px;
+            transform: translateY(-50%);
+            background: black;
+            color: #666;
+            border: 2px solid #666;
+            /* White X */
+            font-weight: bold;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 20px;
+            padding: 0;
+            display: none;
+            /* For centering text */
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            transition: opacity 0.2s ease;
+        }
+
+
+        .grid-item:hover>.delete-btn {
+            display: flex;
+        }
+
+        .delete-btn:hover {
+            background: #b32b2b;
+        }
+
+        .group-delete-btn {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 22px;
+            height: 22px;
+            background-color: black;
+            border: 2px solid #666;
+            color: #666;
+            font-weight: bold;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 20px;
+            user-select: none;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            z-index: 10;
+            transition: opacity 0.2s ease;
+        }
+
+        .group-delete-btn:hover {
+            background: #b32b2b;
+        }
+
+        .child-grid:hover>.group-delete-btn {
+            display: flex;
+            opacity: 1;
+        }
+
+        .placeholder {
+            box-sizing: border-box;
+            min-height: 37px;
+            width: 70px;
+            margin: 4px 0;
+            background: #90caf9;
+            border: 2px solid #2196F3;
+            border-radius: 6px;
+        }
+
+        .plus-tab-btn {
+            position: absolute;
+            bottom: 6px;
+            right: 6px;
+            width: 22px;
+            height: 22px;
+            border-radius: 8px;
+            border: none;
+            background-color: black;
+            border: 2px solid #666;
+            color: #666;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            line-height: 20px;
+            padding:0;
+            transition: opacity 0.2s ease;
+        }
+
+        .plus-tab-btn:hover {
+            background-color: #13589c;
+        }
+
+        .child-grid:hover>.plus-tab-btn {
+            display: flex;
+            opacity: 1;
+        }
+
+
+        .new-window-btn {
+            background-color: black;
+            border: 2px solid #666;
+            border-radius: 8px;
+            min-width: 180px;
+            min-height: 35px;
+            color: #666;
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            user-select: none;
+            transition: opacity 0.2s ease;
+            /* Remove position: fixed to let it flow naturally in the grid */
+            /* The parent grid container's grid layout will position it */
+        }
+
+        .new-window-btn:hover {
+            background-color: #292929;
+        }
+
+
+        #drop-indicator {
+            position: fixed;
+            pointer-events: none;
+            z-index: 90;
+            background: #2196F3cc;
+            color: #fff;
+            border-radius: 8px;
+            font-weight: bold;
+            padding: 10px 24px;
+            font-size: 18px;
+            box-shadow: 0 4px 28px #2196F366;
+            display: none;
+        }
+
+        #outside-overlay {
+            display: none;
+            position: fixed;
+            z-index: 80;
+            left: 0;
+            top: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(33, 150, 243, 0.08);
+            pointer-events: none;
+        }
+
+        #outside-overlay.active {
+            display: block;
+            pointer-events: all;
+        }

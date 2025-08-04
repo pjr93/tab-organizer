@@ -7,7 +7,8 @@
     "tabs",
     "windows",
     "storage",
-    "nativeMessaging"
+    "nativeMessaging",
+    "activeTab"
   ],
   "background": {
     "service_worker": "background.js"
