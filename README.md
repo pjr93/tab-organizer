@@ -6,7 +6,7 @@ Welcome to a simple tab organizer! This app reflects the state of windows and ta
 
 To install, here are the instructions:
 
-1) First, download the zip file by clicking on the green code button near the top of the page and click download ZIP. Download it to a nice location
+1) First, download the zip file by clicking on the green code button near the top of the page and click download ZIP. Download it to a nice location.
 
 2) Unpack the .zip file to a folder which will contain the app. (It should unpack to a folder "tab-organizer". You want it all to be contained)
 
@@ -19,7 +19,7 @@ To install, here are the instructions:
 
 4) In the top right corner, turn on Developer mode
 
-5) In the top left corner, click load unpacked, then find the folder which contains the app (wherever you unpacked your zip to)
+5) In the top left corner, click load unpacked, then find the folder which contains the app (wherever you unpacked your zip to). MAKE SURE to pick the folder which directly contains manifest.json (i.e. when you enter the folder, manifest.json should be there. Depending on your extraction method, the folder may contain another folder which THEN contains the app)
 
 6) Enjoy!
 

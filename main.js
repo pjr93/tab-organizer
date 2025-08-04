@@ -9,6 +9,7 @@ let draggedId = null;       // The unique id of dragged item
 let placeholder = null;     // Placeholder element showing drop position
 let nextItemId = 1;         // Global unique id counter
 let windowGroupData = [];
+let titles = {};
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "sync_browser_state") {
@@ -69,31 +70,39 @@ chrome.tabs.onActivated.addListener(activeInfo => {
 
 
 async function initialize() {
-    try {
-        const data = await chrome.storage.local.get(["windows"]);
-        const { windows } = data;
+  try {
+    const windowsData = await chrome.storage.local.get(['windows']);
+    const titlesData = await chrome.storage.local.get(['titles']);
 
-        windowGroupData = (windows || []).map(window => {
-            if (!window.tabs) return [];
-            return window.tabs
-                .filter(tab => tab && typeof tab.title === "string")
-                .map(tab => ({
-                    id: tab.id,
-                    text: tab.title.slice(0, 20),
-                    ...tab
-                }));
-        });
-
-        groupData = windowGroupData.length ? windowGroupData : [[]]; // fallback if empty
-
-        renderBoard();  // Now that groupData is populated, render!
-
-    } catch (err) {
-        console.error("Failed to load windows/tabs:", err);
-        groupData = [[]];  // Fallback to empty group to avoid errors
-        renderBoard();
+    if (titlesData && titlesData.titles) {
+      titles = titlesData.titles;
+      console.log(titles);
     }
+
+    const windows = windowsData.windows || [];
+
+    windowGroupData = windows.map(window => {
+      if (!window.tabs) return [];
+      return window.tabs
+        .filter(tab => tab && typeof tab.title === 'string')
+        .map(tab => ({
+          id: tab.id,
+          text: tab.title.slice(0, 20),
+          ...tab
+        }));
+    });
+
+    groupData = windowGroupData.length ? windowGroupData : [[]];
+
+    renderBoard();
+
+  } catch (err) {
+    console.error("Failed to load windows/tabs:", err);
+    groupData = [[]];
+    renderBoard();
+  }
 }
+
 
 function setupAddButtons() {
 
@@ -139,6 +148,15 @@ function setupAddButtons() {
     };
 }
 setupAddButtons();
+
+function createEditableTitleBox(parentElement) {
+    const title = document.createElement('div');
+    title.className = 'editable-title';
+    title.contentEditable = 'true';
+    title.textContent = '---';
+    parentElement.appendChild(title);
+    return title;
+}
 
 function syncGroupDataFromBrowser() {
     chrome.windows.getAll({ populate: true }, (windows) => {
@@ -379,6 +397,27 @@ function createGroup(items = [], idx) {
     for (const itemObj of items) {
         group.appendChild(createGridItem(itemObj));
     }
+
+    const title = createEditableTitleBox(group);
+    // Optional: load saved title if exists (e.g., from your groupData)
+
+    if (titles[idx]) {
+        console.log(titles[idx])
+        title.textContent = title[idx]
+    }
+
+    // Save title on blur
+    title.addEventListener('blur', () => {
+        const text = title.textContent.trim();
+        titles[idx] = text;
+
+        chrome.storage.local.set({ titles }, () => {
+            if (chrome.runtime.lastError) {
+                console.error("Failed to save titles:", chrome.runtime.lastError);
+            }
+        });
+        console.log('SAVED!')
+    });
 
     return group;
 }

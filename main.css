@@ -154,7 +154,7 @@
             font-weight: bold;
             font-size: 16px;
             line-height: 20px;
-            padding:0;
+            padding: 0;
             transition: opacity 0.2s ease;
         }
 
@@ -191,6 +191,36 @@
             background-color: #292929;
         }
 
+
+        .editable-title {
+            position: absolute;
+            top: -3px;
+            /* aligns with the top edge */
+            left: 50%;
+            /* move to horizontal center */
+            transform: translateX(-50%) translateY(-50%);
+            /* center horizontally, pull up 50% of its height */
+
+            background: #222;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 6px 6px 0 0;
+            font-weight: bold;
+            cursor: text;
+            user-select: text;
+            min-width: 100px;
+            max-width: 180px;
+            text-align: center;
+            box-sizing: border-box;
+            box-shadow: 0 2px 6px rgb(0 0 0 / 0.8);
+            /* Optional: border for clarity */
+            border: 1px solid #444;
+            z-index: 20;
+            outline: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
         #drop-indicator {
             position: fixed;
