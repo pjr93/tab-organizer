@@ -10,7 +10,7 @@ To install, here are the instructions:
 
 2) Unpack the .zip file to a folder which will contain the app. (It should unpack to a folder "tab-organizer". You want it all to be contained)
 
-3) Depending on your version of chromium navigate to either:
+3) Depending on your version of chromium navigate (type/ copy paste the relevant link below to your address bar) to either:
 
 - brave://extensions
 - chrome://extensions
