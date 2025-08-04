@@ -70,47 +70,45 @@ chrome.tabs.onActivated.addListener(activeInfo => {
 
 
 async function initialize() {
-  try {
-    const windowsData = await chrome.storage.local.get(['windows']);
-    const titlesData = await chrome.storage.local.get(['titles']);
+    try {
+        const windowsData = await chrome.storage.local.get(['windows']);
+        const titlesData = await chrome.storage.local.get(['titles']);
 
-    if (titlesData && titlesData.titles) {
-      titles = titlesData.titles;
-      console.log(titles);
+        if (titlesData && titlesData.titles) {
+            titles = titlesData.titles;
+            console.log(titles);
+        }
+
+        const windows = windowsData.windows || [];
+
+        windowGroupData = windows.map(window => {
+            if (!window.tabs) return [];
+            return window.tabs
+                .filter(tab => tab && typeof tab.title === 'string')
+                .map(tab => ({
+                    id: tab.id,
+                    text: tab.title.slice(0, 20),
+                    ...tab
+                }));
+        });
+
+        groupData = windowGroupData.length ? windowGroupData : [[]];
+
+        renderBoard();
+
+    } catch (err) {
+        console.error("Failed to load windows/tabs:", err);
+        groupData = [[]];
+        renderBoard();
     }
-
-    const windows = windowsData.windows || [];
-
-    windowGroupData = windows.map(window => {
-      if (!window.tabs) return [];
-      return window.tabs
-        .filter(tab => tab && typeof tab.title === 'string')
-        .map(tab => ({
-          id: tab.id,
-          text: tab.title.slice(0, 20),
-          ...tab
-        }));
-    });
-
-    groupData = windowGroupData.length ? windowGroupData : [[]];
-
-    renderBoard();
-
-  } catch (err) {
-    console.error("Failed to load windows/tabs:", err);
-    groupData = [[]];
-    renderBoard();
-  }
 }
 
 
 function setupAddButtons() {
+    const originalCreateGroup = createGroup;
 
-    // Enhance `createGroup` to add "+ New Tab" button inside each group
-    const originalCreateGroup = createGroup; // Save original
-
-    window.createGroup = function (items = [], idx) {
-        const group = originalCreateGroup(items, idx);
+    window.createGroup = function (items, idx, windowId, titleText) {
+        const group = originalCreateGroup(items, idx, windowId, titleText);
 
         // Create "+ New Tab" button for this group
         const plusTabBtn = document.createElement('button');
@@ -118,16 +116,10 @@ function setupAddButtons() {
         plusTabBtn.textContent = '+';
         plusTabBtn.title = "Add new tab";
 
-
         plusTabBtn.addEventListener('click', (e) => {
             e.stopPropagation();
 
-            // Get window ID of this group
-            const groupDataArray = groupData[idx];
-            const windowId = (groupDataArray && groupDataArray[0]) ? groupDataArray[0].windowId : null;
-
             if (windowId != null) {
-                // Create new tab in the group's window
                 chrome.tabs.create({ windowId: windowId, active: false }, () => {
                     syncGroupDataFromBrowser();
                 });
@@ -147,6 +139,7 @@ function setupAddButtons() {
         return group;
     };
 }
+
 setupAddButtons();
 
 function createEditableTitleBox(parentElement) {
@@ -296,7 +289,7 @@ function getDragAfterElement(container, x, y) {
     return afterElement;
 }
 
-function createGroup(items = [], idx) {
+function createGroup(items = [], idx, windowId = null, titleText = '---',) {
     const group = document.createElement('div');
     group.className = 'child-grid';
     group.dataset.group = idx;
@@ -391,6 +384,7 @@ function createGroup(items = [], idx) {
             renderBoard();
         }
     });
+
     group.appendChild(deleteBtn);
 
     // Add items to group
@@ -399,24 +393,18 @@ function createGroup(items = [], idx) {
     }
 
     const title = createEditableTitleBox(group);
-    // Optional: load saved title if exists (e.g., from your groupData)
-
-    if (titles[idx]) {
-        console.log(titles[idx])
-        title.textContent = title[idx]
-    }
-
-    // Save title on blur
+    title.textContent = titleText;
     title.addEventListener('blur', () => {
-        const text = title.textContent.trim();
-        titles[idx] = text;
-
-        chrome.storage.local.set({ titles }, () => {
-            if (chrome.runtime.lastError) {
-                console.error("Failed to save titles:", chrome.runtime.lastError);
-            }
-        });
-        console.log('SAVED!')
+        const text = title.textContent.trim() || 'Untitled';
+        if (windowId) {
+            titles[windowId] = text;  // index by windowId
+            chrome.storage.local.set({ titles }, () => {
+                if (chrome.runtime.lastError) {
+                    console.error("Failed to save titles:", chrome.runtime.lastError);
+                }
+            });
+            console.log('Title saved for window', windowId, ':', text);
+        }
     });
 
     return group;
@@ -500,6 +488,11 @@ function removeFromGroupData(id) {
     for (const group of groupData) {
         const index = group.findIndex(item => item.id === id);
         if (index !== -1) {
+            const windowId = group[0]?.windowId;
+            if (windowId && titles[windowId]) {
+                delete titles[windowId];
+                chrome.storage.local.set({ titles });
+            }
             group.splice(index, 1);
             break;
         }
@@ -566,7 +559,11 @@ outsideOverlay.addEventListener('drop', ev => {
 function renderBoard() {
     parentGrid.innerHTML = '';
     groupData = groupData.filter(g => g.length);
-    groupData.forEach((items, idx) => parentGrid.appendChild(createGroup(items, idx)));
+    groupData.forEach((items, idx) => {
+        const windowId = items[0]?.windowId;  // get windowId from first tab
+        const titleText = windowId && titles[windowId] ? titles[windowId] : '---';
+        parentGrid.appendChild(createGroup(items, idx, windowId, titleText,));
+    });
 
     const newWindowBtn = document.createElement('button');
     newWindowBtn.className = 'new-window-btn';
