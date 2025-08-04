@@ -11,10 +11,11 @@ To install, here are the instructions:
 2) Unpack the .zip file to a folder which will contain the app. (It should unpack to a folder "tab-organizer". You want it all to be contained)
 
 3) Depending on your version of chromium navigate to either:
-brave://extensions
-chrome://extensions
-edge://extensions
-whateverChromiumBrowserYouHave://extensions
+
+- brave://extensions
+- chrome://extensions
+- edge://extensions
+- whateverChromiumBrowserYouHave://extensions
 
 4) In the top right corner, turn on Developer mode
 
