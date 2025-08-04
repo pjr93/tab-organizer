@@ -6,7 +6,7 @@ Welcome to a simple tab organizer! This app reflects the state of windows and ta
 
 To install, here are the instructions:
 
-1) First, download the zip file by clicking on the green code button near the top of the page and click download ZIP.
+1) First, download the zip file by clicking on the green code button near the top of the page and click download ZIP. Download it to a nice location
 
 2) Unpack the .zip file to a folder which will contain the app. (It should unpack to a folder "tab-organizer". You want it all to be contained)
 
