@@ -2,6 +2,7 @@ const parentGrid = document.getElementById('parent-grid');
 const dropIndicator = document.getElementById('drop-indicator');
 const outsideOverlay = document.getElementById('outside-overlay');
 
+let lastSelectedIndex = null;
 let draggedItem = null;
 let draggedId = null;
 let placeholder = null;
@@ -165,7 +166,7 @@ function smartMoveTab(tabId, targetWindowId, targetIndex) {
                             if (newWindow.tabs && newWindow.tabs.length > 0) {
                                 const defaultTabId = newWindow.tabs[0].id;
                                 if (defaultTabId !== tabId) {
-                                    chrome.tabs.remove(defaultTabId, () => {});
+                                    chrome.tabs.remove(defaultTabId, () => { });
                                 }
                             }
                         }
@@ -304,9 +305,11 @@ function createGroup(items = [], idx, windowId = null, titleText = '---') {
         const text = title.textContent.trim() || 'Untitled';
         if (windowId) {
             titles[windowId] = text;
-            chrome.storage.local.set({ titles }, () => {});
+            chrome.storage.local.set({ titles }, () => { });
         }
     });
+
+    
     return group;
 }
 
@@ -320,22 +323,49 @@ function createGridItem(itemObj) {
     item.draggable = true;
     item.dataset.id = itemObj.id;
 
+
     item.addEventListener('click', (e) => {
-        if (e.ctrlKey || e.metaKey) {
-            if (selectedTabIds.has(itemObj.id)) {
-                selectedTabIds.delete(itemObj.id);
+        // Get the full flat list of all tab elements in the order shown on screen
+        const allItems = Array.from(document.querySelectorAll('.grid-item'));
+        const currentIndex = allItems.indexOf(item);
+
+        if (e.shiftKey && lastSelectedIndex !== null) {
+            const start = Math.min(currentIndex, lastSelectedIndex);
+            const end = Math.max(currentIndex, lastSelectedIndex);
+
+            // Clear previous selected classes to avoid stale selections
+            allItems.forEach(el => el.classList.remove('selected'));
+            selectedTabIds.clear();
+
+            // Select the range between lastSelectedIndex and currentIndex (inclusive)
+            for (let i = start; i <= end; i++) {
+                const rangeItem = allItems[i];
+                const id = Number(rangeItem.dataset.id);
+                selectedTabIds.add(id);
+                rangeItem.classList.add('selected');
+            }
+        } else if (e.ctrlKey || e.metaKey) {
+            const id = Number(item.dataset.id);
+            if (selectedTabIds.has(id)) {
+                selectedTabIds.delete(id);
                 item.classList.remove('selected');
             } else {
-                selectedTabIds.add(itemObj.id);
+                selectedTabIds.add(id);
                 item.classList.add('selected');
             }
         } else {
-            document.querySelectorAll('.grid-item.selected').forEach(el => el.classList.remove('selected'));
+            // Normal click: clear all previous selections and select only the clicked tab
+            allItems.forEach(el => el.classList.remove('selected'));
             selectedTabIds.clear();
-            selectedTabIds.add(itemObj.id);
+            const id = Number(item.dataset.id);
+            selectedTabIds.add(id);
             item.classList.add('selected');
         }
+
+        // Update lastSelectedIndex to current for next shift-click
+        lastSelectedIndex = currentIndex;
     });
+
 
     item.addEventListener('dragstart', e => {
         if (!selectedTabIds.has(itemObj.id)) {
@@ -447,55 +477,55 @@ function deactivateOutsideOverlay() {
 outsideOverlay.addEventListener('dragenter', e => e.preventDefault());
 outsideOverlay.addEventListener('dragover', e => e.preventDefault());
 outsideOverlay.addEventListener('drop', ev => {
-  ev.preventDefault();
-  if (!draggedItem || draggedId == null) return;
+    ev.preventDefault();
+    if (!draggedItem || draggedId == null) return;
 
-  let tabsToMove = Array.from(selectedTabIds).map(id => getItemById(id)).filter(Boolean);
-  if (tabsToMove.length === 0) {
-    const itemObj = getItemById(draggedId);
-    if (!itemObj) return;
-    tabsToMove = [itemObj];
-  }
+    let tabsToMove = Array.from(selectedTabIds).map(id => getItemById(id)).filter(Boolean);
+    if (tabsToMove.length === 0) {
+        const itemObj = getItemById(draggedId);
+        if (!itemObj) return;
+        tabsToMove = [itemObj];
+    }
 
-  for (const tab of tabsToMove) {
-    removeFromGroupData(tab.id);
-  }
-  groupData.push([...tabsToMove]);
+    for (const tab of tabsToMove) {
+        removeFromGroupData(tab.id);
+    }
+    groupData.push([...tabsToMove]);
 
-  chrome.windows.getCurrent(prevWindow => {
-    chrome.windows.create({ state: 'maximized', focused: true }, newWindow => {
-      if (!newWindow || !newWindow.id) return;
-      const newWindowId = newWindow.id;
-      const tabIdsToMove = tabsToMove.map(t => t.id);
+    chrome.windows.getCurrent(prevWindow => {
+        chrome.windows.create({ state: 'maximized', focused: true }, newWindow => {
+            if (!newWindow || !newWindow.id) return;
+            const newWindowId = newWindow.id;
+            const tabIdsToMove = tabsToMove.map(t => t.id);
 
-      chrome.tabs.move(tabIdsToMove, { windowId: newWindowId, index: -1 }, () => {
-        // Remove default new tab created by chrome.windows.create if it exists and is not one of our tabs
-        if (newWindow.tabs && newWindow.tabs.length > 0) {
-          const defaultTabIds = newWindow.tabs.filter(t => !tabIdsToMove.includes(t.id)).map(t => t.id);
-          if (defaultTabIds.length) {
-            chrome.tabs.remove(defaultTabIds, () => {
-              chrome.windows.update(prevWindow.id, { focused: true }, () => {
-                syncGroupDataFromBrowser();
-              });
+            chrome.tabs.move(tabIdsToMove, { windowId: newWindowId, index: -1 }, () => {
+                // Remove default new tab created by chrome.windows.create if it exists and is not one of our tabs
+                if (newWindow.tabs && newWindow.tabs.length > 0) {
+                    const defaultTabIds = newWindow.tabs.filter(t => !tabIdsToMove.includes(t.id)).map(t => t.id);
+                    if (defaultTabIds.length) {
+                        chrome.tabs.remove(defaultTabIds, () => {
+                            chrome.windows.update(prevWindow.id, { focused: true }, () => {
+                                syncGroupDataFromBrowser();
+                            });
+                        });
+                    } else {
+                        chrome.windows.update(prevWindow.id, { focused: true }, () => {
+                            syncGroupDataFromBrowser();
+                        });
+                    }
+                } else {
+                    chrome.windows.update(prevWindow.id, { focused: true }, () => {
+                        syncGroupDataFromBrowser();
+                    });
+                }
             });
-          } else {
-            chrome.windows.update(prevWindow.id, { focused: true }, () => {
-              syncGroupDataFromBrowser();
-            });
-          }
-        } else {
-          chrome.windows.update(prevWindow.id, { focused: true }, () => {
-            syncGroupDataFromBrowser();
-          });
-        }
-      });
+        });
     });
-  });
 
-  renderBoard();
-  hideDropIndicator();
-  deactivateOutsideOverlay();
-  selectedTabIds.clear();
+    renderBoard();
+    hideDropIndicator();
+    deactivateOutsideOverlay();
+    selectedTabIds.clear();
 });
 
 
