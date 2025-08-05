@@ -2,14 +2,14 @@ const parentGrid = document.getElementById('parent-grid');
 const dropIndicator = document.getElementById('drop-indicator');
 const outsideOverlay = document.getElementById('outside-overlay');
 
-
-
-let draggedItem = null;     // The DOM element being dragged
-let draggedId = null;       // The unique id of dragged item
-let placeholder = null;     // Placeholder element showing drop position
-let nextItemId = 1;         // Global unique id counter
+let draggedItem = null;
+let draggedId = null;
+let placeholder = null;
+let nextItemId = 1;
 let windowGroupData = [];
 let titles = {};
+let selectedTabIds = new Set();
+let groupData;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "sync_browser_state") {
@@ -51,36 +51,21 @@ function hideTabPreview() {
     if (preview) preview.style.display = "none";
 }
 
-
-
-
 let previousActiveTabId = null;
 
 chrome.tabs.onActivated.addListener(activeInfo => {
     const newActiveTabId = activeInfo.tabId;
-
-    if (previousActiveTabId !== null) {
-        console.log("Switched from tab", previousActiveTabId, "to tab", newActiveTabId);
-    } else {
-        console.log("Active tab initially is", newActiveTabId);
-    }
-
     previousActiveTabId = newActiveTabId;
 });
-
 
 async function initialize() {
     try {
         const windowsData = await chrome.storage.local.get(['windows']);
         const titlesData = await chrome.storage.local.get(['titles']);
-
         if (titlesData && titlesData.titles) {
             titles = titlesData.titles;
-            console.log(titles);
         }
-
         const windows = windowsData.windows || [];
-
         windowGroupData = windows.map(window => {
             if (!window.tabs) return [];
             return window.tabs
@@ -91,55 +76,40 @@ async function initialize() {
                     ...tab
                 }));
         });
-
         groupData = windowGroupData.length ? windowGroupData : [[]];
-
         renderBoard();
-
     } catch (err) {
-        console.error("Failed to load windows/tabs:", err);
         groupData = [[]];
         renderBoard();
     }
 }
 
-
 function setupAddButtons() {
     const originalCreateGroup = createGroup;
-
     window.createGroup = function (items, idx, windowId, titleText) {
         const group = originalCreateGroup(items, idx, windowId, titleText);
-
-        // Create "+ New Tab" button for this group
         const plusTabBtn = document.createElement('button');
         plusTabBtn.className = 'plus-tab-btn';
         plusTabBtn.textContent = '+';
         plusTabBtn.title = "Add new tab";
-
         plusTabBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-
             if (windowId != null) {
                 chrome.tabs.create({ windowId: windowId, active: false }, () => {
                     syncGroupDataFromBrowser();
                 });
             }
         });
-
         group.appendChild(plusTabBtn);
-
-        // Show the "+ New Tab" button on group hover
         group.addEventListener('mouseenter', () => {
             plusTabBtn.style.display = 'flex';
         });
         group.addEventListener('mouseleave', () => {
             plusTabBtn.style.display = 'none';
         });
-
         return group;
     };
 }
-
 setupAddButtons();
 
 function createEditableTitleBox(parentElement) {
@@ -153,11 +123,7 @@ function createEditableTitleBox(parentElement) {
 
 function syncGroupDataFromBrowser() {
     chrome.windows.getAll({ populate: true }, (windows) => {
-        if (chrome.runtime.lastError) {
-            console.error("Failed to get windows:", chrome.runtime.lastError);
-            return;
-        }
-
+        if (chrome.runtime.lastError) return;
         groupData = windows.map(win => {
             return (win.tabs || []).map(tab => ({
                 id: tab.id,
@@ -167,23 +133,14 @@ function syncGroupDataFromBrowser() {
                 ...tab
             }));
         });
-
         renderBoard();
     });
 }
 
-
-let groupData
-
-
 initialize().then(() => {
-    // After initializing local storage data, sync browser windows/tabs for current state
     syncGroupDataFromBrowser();
 });
-console.log("HELP")
-console.log(groupData)
 
-// Clear existing placeholder if any
 function clearPlaceholder() {
     if (placeholder && placeholder.parentElement) {
         placeholder.parentElement.removeChild(placeholder);
@@ -195,34 +152,20 @@ function smartMoveTab(tabId, targetWindowId, targetIndex) {
     if (targetWindowId == null) {
         chrome.windows.getCurrent((prevWindow) => {
             chrome.windows.create(
-                { state: "maximized", focused: true }, // must be focused for maximize to apply
+                { state: "maximized", focused: true },
                 (newWindow) => {
-                    if (chrome.runtime.lastError) {
-                        console.error("Failed to create window:", chrome.runtime.lastError);
-                        return;
-                    }
-
-                    // Move the tab into the new window at the desired index
+                    if (chrome.runtime.lastError) return;
                     chrome.tabs.move(
                         tabId,
                         { windowId: newWindow.id, index: targetIndex || 0 },
                         () => {
-                            // Refocus previous window to restore focus
                             chrome.windows.update(prevWindow.id, { focused: true }, () => {
                                 syncGroupDataFromBrowser();
                             });
-
-                            // Remove the default "New Tab" page tab created in the new window
                             if (newWindow.tabs && newWindow.tabs.length > 0) {
                                 const defaultTabId = newWindow.tabs[0].id;
-
-                                // Only remove if default tab is NOT the tab you just moved
                                 if (defaultTabId !== tabId) {
-                                    chrome.tabs.remove(defaultTabId, () => {
-                                        if (chrome.runtime.lastError) {
-                                            console.error("Failed to remove default tab:", chrome.runtime.lastError);
-                                        }
-                                    });
+                                    chrome.tabs.remove(defaultTabId, () => {});
                                 }
                             }
                         }
@@ -241,41 +184,24 @@ function smartMoveTab(tabId, targetWindowId, targetIndex) {
     }
 }
 
-
-
-// Find nearest item element in flex-wrap container for insertion logic
 function getDragAfterElement(container, x, y) {
     const draggableElements = [...container.querySelectorAll('.grid-item:not(.dragging)')];
-
-    // Will hold the element just after the pointer
     let afterElement = null;
-
-    // Keep track of minimum distance to decide the "closest after"
     let minDistance = Infinity;
-
     for (const child of draggableElements) {
         const box = child.getBoundingClientRect();
-
-        // Check if pointer is within vertical extent of the child element (same "row")
         if (y >= box.top && y <= box.bottom) {
-            // Pointer horizontal relative to child
             const offset = x - box.left;
-
-            // If pointer is to the left of element start, it's candidate for insertion before the element
             if (offset < 0 && Math.abs(offset) < minDistance) {
                 minDistance = Math.abs(offset);
                 afterElement = child;
             }
         }
     }
-
-    // If none found in same row, check for first element below the pointer vertically
     if (!afterElement) {
         for (const child of draggableElements) {
             const box = child.getBoundingClientRect();
-
             if (box.top > y) {
-                // closer vertical element below pointer
                 const dist = box.top - y;
                 if (dist < minDistance) {
                     minDistance = dist;
@@ -284,12 +210,10 @@ function getDragAfterElement(container, x, y) {
             }
         }
     }
-
-    // return element before which to insert, or null for append
     return afterElement;
 }
 
-function createGroup(items = [], idx, windowId = null, titleText = '---',) {
+function createGroup(items = [], idx, windowId = null, titleText = '---') {
     const group = document.createElement('div');
     group.className = 'child-grid';
     group.dataset.group = idx;
@@ -298,16 +222,12 @@ function createGroup(items = [], idx, windowId = null, titleText = '---',) {
         e.preventDefault();
         group.classList.add('dragover');
         if (!draggedItem) return;
-
         const afterElement = getDragAfterElement(group, e.clientX, e.clientY);
         clearPlaceholder();
-
-        // Create placeholder with same size as dragged item
         placeholder = document.createElement('div');
         placeholder.classList.add('placeholder');
         placeholder.style.minHeight = draggedItem.offsetHeight + 'px';
         placeholder.style.width = draggedItem.offsetWidth + 'px';
-
         if (afterElement == null) {
             group.appendChild(placeholder);
         } else {
@@ -325,69 +245,55 @@ function createGroup(items = [], idx, windowId = null, titleText = '---',) {
     group.addEventListener('drop', e => {
         e.preventDefault();
         group.classList.remove('dragover');
-
         if (!draggedItem || draggedId === null) return;
-        const itemObj = getItemById(draggedId);
-        if (!itemObj) {
-            hideDropIndicator();
-            deactivateOutsideOverlay();
-            return;
+        let tabsToMove = Array.from(selectedTabIds).map(id => getItemById(id)).filter(Boolean);
+        if (!tabsToMove.length) tabsToMove = [getItemById(draggedId)];
+        tabsToMove = tabsToMove.filter(Boolean);
+        for (const tab of tabsToMove) {
+            removeFromGroupData(tab.id);
         }
-        removeFromGroupData(draggedId);
-
         const childrenArray = Array.from(group.children).filter(ch =>
             ch.classList.contains('grid-item') || ch === placeholder
         );
-
         let newIndex = placeholder && placeholder.parentElement === group
             ? childrenArray.indexOf(placeholder)
             : childrenArray.length;
-
         clearPlaceholder();
-
         let targetWindowId = null;
         if (groupData[idx] && groupData[idx].length > 0) {
             targetWindowId = groupData[idx][0].windowId;
         } else {
-
-            targetWindowId = itemObj.windowId;
+            targetWindowId = tabsToMove.length ? tabsToMove[0].windowId : null;
         }
-
-        smartMoveTab(itemObj.id, targetWindowId, newIndex);
-
-        groupData[idx].splice(newIndex, 0, itemObj);
+        tabsToMove.forEach((tab, i) => {
+            smartMoveTab(tab.id, targetWindowId, newIndex + i);
+        });
+        if (!groupData[idx]) groupData[idx] = [];
+        groupData[idx].splice(newIndex, 0, ...tabsToMove);
         renderBoard();
         hideDropIndicator();
         deactivateOutsideOverlay();
+        selectedTabIds.clear();
     });
 
-    // Add group delete button
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'group-delete-btn';
     deleteBtn.textContent = '×';
     deleteBtn.title = "Delete this group";
     deleteBtn.addEventListener('click', e => {
         e.stopPropagation();
-        // Close entire window corresponding to this group
         if (groupData[idx] && groupData[idx].length > 0) {
             const windowId = groupData[idx][0].windowId;
             chrome.windows.remove(windowId, () => {
-                if (chrome.runtime.lastError) {
-                    console.error("Failed to close window:", chrome.runtime.lastError);
-                }
-                // After closing, sync UI state:
                 syncGroupDataFromBrowser();
             });
         } else {
-            // fallback: just remove from groupData if no tabs (should be rare)
             groupData.splice(idx, 1);
             renderBoard();
         }
     });
-
     group.appendChild(deleteBtn);
 
-    // Add items to group
     for (const itemObj of items) {
         group.appendChild(createGridItem(itemObj));
     }
@@ -397,16 +303,10 @@ function createGroup(items = [], idx, windowId = null, titleText = '---',) {
     title.addEventListener('blur', () => {
         const text = title.textContent.trim() || 'Untitled';
         if (windowId) {
-            titles[windowId] = text;  // index by windowId
-            chrome.storage.local.set({ titles }, () => {
-                if (chrome.runtime.lastError) {
-                    console.error("Failed to save titles:", chrome.runtime.lastError);
-                }
-            });
-            console.log('Title saved for window', windowId, ':', text);
+            titles[windowId] = text;
+            chrome.storage.local.set({ titles }, () => {});
         }
     });
-
     return group;
 }
 
@@ -414,40 +314,42 @@ function createGridItem(itemObj) {
     const item = document.createElement('div');
     item.className = 'grid-item';
     item.textContent = itemObj.text;
-
     if (item.textContent == "Reflection Board") {
-        item.style.background = "green"
+        item.style.background = "green";
     }
     item.draggable = true;
     item.dataset.id = itemObj.id;
 
-    const btn = document.createElement('button');
-    btn.className = 'delete-btn';
-    btn.textContent = '×';
-    btn.onclick = e => {
-        e.stopPropagation();
-        // Close the tab in the browser
-        chrome.tabs.remove(itemObj.id, () => {
-            if (chrome.runtime.lastError) {
-                console.error("Failed to close tab:", chrome.runtime.lastError);
+    item.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+            if (selectedTabIds.has(itemObj.id)) {
+                selectedTabIds.delete(itemObj.id);
+                item.classList.remove('selected');
+            } else {
+                selectedTabIds.add(itemObj.id);
+                item.classList.add('selected');
             }
-            // After closing, sync UI state:
-            syncGroupDataFromBrowser();
-        });
-    };
-
-
-    item.appendChild(btn);
-
+        } else {
+            document.querySelectorAll('.grid-item.selected').forEach(el => el.classList.remove('selected'));
+            selectedTabIds.clear();
+            selectedTabIds.add(itemObj.id);
+            item.classList.add('selected');
+        }
+    });
 
     item.addEventListener('dragstart', e => {
+        if (!selectedTabIds.has(itemObj.id)) {
+            document.querySelectorAll('.grid-item.selected').forEach(el => el.classList.remove('selected'));
+            selectedTabIds.clear();
+            selectedTabIds.add(itemObj.id);
+            item.classList.add('selected');
+        }
         draggedItem = item;
         draggedId = itemObj.id;
         item.classList.add('dragging');
         setTimeout(() => { item.style.display = 'none'; }, 0);
         document.addEventListener('dragover', onDragAnywhere);
     });
-
     item.addEventListener('dragend', e => {
         draggedItem = null;
         draggedId = null;
@@ -458,21 +360,14 @@ function createGridItem(itemObj) {
         clearPlaceholder();
         document.removeEventListener('dragover', onDragAnywhere);
     });
-
     item.addEventListener('contextmenu', e => {
         e.preventDefault();
         chrome.tabs.update(itemObj.id, { active: true }, () => {
-            if (chrome.runtime.lastError) {
-                console.error("Failed to focus tab:", chrome.runtime.lastError);
-            } else {
-                // Also optionally focus the window containing this tab
-                if (itemObj.windowId != null) {
-                    chrome.windows.update(itemObj.windowId, { focused: true });
-                }
+            if (itemObj.windowId != null) {
+                chrome.windows.update(itemObj.windowId, { focused: true });
             }
         });
     });
-
     item.addEventListener('mouseenter', e => {
         showTabPreview(itemObj, item);
     });
@@ -480,7 +375,18 @@ function createGridItem(itemObj) {
         hideTabPreview();
     });
 
+    const btn = document.createElement('button');
+    btn.className = 'delete-btn';
+    btn.textContent = '×';
+    btn.onclick = e => {
+        e.stopPropagation();
+        chrome.tabs.remove(itemObj.id, () => {
+            syncGroupDataFromBrowser();
+        });
+    };
+    item.appendChild(btn);
 
+    if (selectedTabIds.has(itemObj.id)) item.classList.add('selected');
     return item;
 }
 
@@ -511,7 +417,6 @@ function getItemById(id) {
 function onDragAnywhere(ev) {
     const grids = Array.from(document.elementsFromPoint(ev.clientX, ev.clientY))
         .filter(e => e.classList && e.classList.contains('child-grid'));
-
     if (grids.length === 0 && draggedItem) {
         showDropIndicator(ev.clientX, ev.clientY);
         activateOutsideOverlay();
@@ -542,45 +447,80 @@ function deactivateOutsideOverlay() {
 outsideOverlay.addEventListener('dragenter', e => e.preventDefault());
 outsideOverlay.addEventListener('dragover', e => e.preventDefault());
 outsideOverlay.addEventListener('drop', ev => {
-    ev.preventDefault();
-    if (!draggedItem || draggedId == null) return;
+  ev.preventDefault();
+  if (!draggedItem || draggedId == null) return;
+
+  let tabsToMove = Array.from(selectedTabIds).map(id => getItemById(id)).filter(Boolean);
+  if (tabsToMove.length === 0) {
     const itemObj = getItemById(draggedId);
     if (!itemObj) return;
-    removeFromGroupData(draggedId);
-    groupData.push([itemObj]);
+    tabsToMove = [itemObj];
+  }
 
-    smartMoveTab(itemObj.id, null, 0);
+  for (const tab of tabsToMove) {
+    removeFromGroupData(tab.id);
+  }
+  groupData.push([...tabsToMove]);
 
-    renderBoard();
-    hideDropIndicator();
-    deactivateOutsideOverlay();
+  chrome.windows.getCurrent(prevWindow => {
+    chrome.windows.create({ state: 'maximized', focused: true }, newWindow => {
+      if (!newWindow || !newWindow.id) return;
+      const newWindowId = newWindow.id;
+      const tabIdsToMove = tabsToMove.map(t => t.id);
+
+      chrome.tabs.move(tabIdsToMove, { windowId: newWindowId, index: -1 }, () => {
+        // Remove default new tab created by chrome.windows.create if it exists and is not one of our tabs
+        if (newWindow.tabs && newWindow.tabs.length > 0) {
+          const defaultTabIds = newWindow.tabs.filter(t => !tabIdsToMove.includes(t.id)).map(t => t.id);
+          if (defaultTabIds.length) {
+            chrome.tabs.remove(defaultTabIds, () => {
+              chrome.windows.update(prevWindow.id, { focused: true }, () => {
+                syncGroupDataFromBrowser();
+              });
+            });
+          } else {
+            chrome.windows.update(prevWindow.id, { focused: true }, () => {
+              syncGroupDataFromBrowser();
+            });
+          }
+        } else {
+          chrome.windows.update(prevWindow.id, { focused: true }, () => {
+            syncGroupDataFromBrowser();
+          });
+        }
+      });
+    });
+  });
+
+  renderBoard();
+  hideDropIndicator();
+  deactivateOutsideOverlay();
+  selectedTabIds.clear();
 });
+
+
+
+
+
 
 function renderBoard() {
     parentGrid.innerHTML = '';
     groupData = groupData.filter(g => g.length);
     groupData.forEach((items, idx) => {
-        const windowId = items[0]?.windowId;  // get windowId from first tab
+        const windowId = items[0]?.windowId;
         const titleText = windowId && titles[windowId] ? titles[windowId] : '---';
-        parentGrid.appendChild(createGroup(items, idx, windowId, titleText,));
+        parentGrid.appendChild(createGroup(items, idx, windowId, titleText));
     });
-
     const newWindowBtn = document.createElement('button');
     newWindowBtn.className = 'new-window-btn';
     newWindowBtn.textContent = '+';
     newWindowBtn.title = 'Create new window';
     newWindowBtn.type = 'button';
-    // The .new-window-btn CSS style already ensures correct appearance
-
     newWindowBtn.addEventListener('click', () => {
         chrome.windows.getCurrent((prevWindow) => {
             chrome.windows.create(
                 { state: "maximized", focused: true },
                 (newWindow) => {
-                    if (chrome.runtime.lastError) {
-                        console.error("Failed to create window:", chrome.runtime.lastError);
-                        return;
-                    }
                     chrome.windows.update(prevWindow.id, { focused: true }, () => {
                         syncGroupDataFromBrowser();
                     });
@@ -588,17 +528,6 @@ function renderBoard() {
             );
         });
     });
-
     parentGrid.appendChild(newWindowBtn);
 }
-
-
-window.addDemoItem = function () {
-    if (groupData.length === 0) groupData.push([]);
-    groupData[0].push({ id: nextItemId++, text: 'Random' + Math.floor(Math.random() * 90 + 10) });
-    renderBoard();
-};
-
 renderBoard();
-
-

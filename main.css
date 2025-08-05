@@ -52,6 +52,12 @@
             box-sizing: border-box;
             border-radius: 2px;
             background: rgb(37, 37, 37);
+
+    transition: background-color 0.5s ease;
+        }
+
+        .grid-item.selected {
+            background-color: rgb(189, 132, 132);
         }
 
         .grid-item.dragging {
@@ -221,6 +227,10 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
+
+
+        /* .grid-item.unselected */
 
         #drop-indicator {
             position: fixed;
