@@ -23,6 +23,12 @@ To install, here are the instructions:
 
 6) Enjoy!
 
+## Update
+
+1) Download the ZIP and unpack in same way you did above. The ZIP should be in the same location and you should unpack the folder in the exact same way (that way the folder structure is preserved)
+
+2) go to the relevant extension page as in step 3) above, find the Tab Organizer extension from the list and click the refresh button. Your app should be updated now!
+
 # How to use
 
 First, you are going to want to click the extensions button on the toolbar (the puzzle icon) and find Tab Organizer. Click the pin icon to pin it
@@ -53,3 +59,12 @@ You can drag a tab between windows by moving them to a different box
 
 If you drag a tab outside of all the boxes, it will open that tab in a new window. It will not focus to that window, but of course you can right click on it to get immediately to the new window and its first tab.
 
+## Saving and loading
+
+There are two kinds of save states: internal and download. 
+
+Internal states are states that are saved in the local chromium storage. You can save and load at will up to 50Mb I believe.
+
+External states are states that are saved locally by a .json file. These have to be sent through downloads and uploads, but otherwise will save and restore all of your tabs
+
+WARNING: I noticed brave://extensions tab not save properly. This might happen with other tabs. Let me know if you notice them
