@@ -53,7 +53,7 @@
             border-radius: 2px;
             background: rgb(37, 37, 37);
 
-    transition: background-color 0.5s ease;
+            transition: background-color 0.5s ease;
         }
 
         .grid-item.selected {
@@ -227,6 +227,79 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
+        /* Container for grouping these buttons */
+        .button-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding: 16px 32px 16px 32px;
+        }
+
+        /* Style specifically for the tab state buttons */
+        .state-btn {
+            background-color: #222;
+            border: 2px solid #666;
+            color: #bbb;
+            font-weight: bold;
+            font-size: 14px;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+            min-width: 140px;
+            text-align: center;
+        }
+
+        /* Hover effect for these buttons */
+        .state-btn:hover {
+            background-color: #13589c;
+            border-color: #2196F3;
+            color: #e0eaff;
+        }
+
+        /* Focus outline for accessibility */
+        .state-btn:focus {
+            
+            outline-offset: 2px;
+        }
+
+        /* Disabled state if needed */
+        .state-btn:disabled {
+            background-color: #444;
+            border-color: #555;
+            color: #777;
+            cursor: default;
+            box-shadow: none;
+        }
+
+        @keyframes glowPulse {
+            0% {
+                box-shadow: 0 0 8px #2196F3cc;
+            }
+
+            50% {
+                box-shadow: 0 0 16px #2196F3ee;
+            }
+
+            100% {
+                box-shadow: 0 0 8px #2196F3cc;
+            }
+        }
+
+        .state-btn.glow {
+            animation: glowPulse 1s ease forwards;
+        }
+
+
+        /* Keep file input hidden */
+        input[type="file"] {
+            display: none;
+        }
+
+
 
 
 

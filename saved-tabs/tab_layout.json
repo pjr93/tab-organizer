@@ -1,0 +1,102 @@
+[
+  {
+    "windowId": 147399532,
+    "title": "---",
+    "tabs": [
+      {
+        "id": 147399551,
+        "title": "Extensions",
+        "url": "chrome://extensions/",
+        "windowId": 147399532,
+        "groupId": -1
+      },
+      {
+        "id": 147399803,
+        "title": "New Tab",
+        "url": "chrome://newtab/",
+        "windowId": 147399532,
+        "groupId": -1
+      },
+      {
+        "id": 147399843,
+        "title": "YouTube",
+        "url": "https://www.youtube.com/",
+        "windowId": 147399532,
+        "groupId": -1
+      },
+      {
+        "id": 147399896,
+        "title": "Reflection Board",
+        "url": "chrome-extension://fmiobkfionfiifbdhaglgeiijadfgfdm/app.html",
+        "windowId": 147399532,
+        "groupId": -1
+      }
+    ]
+  },
+  {
+    "windowId": 147399709,
+    "title": "---",
+    "tabs": [
+      {
+        "id": 147399710,
+        "title": "New Tab",
+        "url": "chrome://newtab/",
+        "windowId": 147399709,
+        "groupId": -1
+      }
+    ]
+  },
+  {
+    "windowId": 147399897,
+    "title": "---",
+    "tabs": [
+      {
+        "id": 147399898,
+        "title": "YouTube",
+        "url": "https://www.youtube.com/",
+        "windowId": 147399897,
+        "groupId": -1
+      },
+      {
+        "id": 147399899,
+        "title": "Electronics, Cars, Fashion, Collectibles & More | eBay",
+        "url": "https://www.ebay.com/",
+        "windowId": 147399897,
+        "groupId": -1
+      }
+    ]
+  },
+  {
+    "windowId": 147399900,
+    "title": "---",
+    "tabs": [
+      {
+        "id": 147399901,
+        "title": "Amazon.com: Jiloma Stone Bath Mat Diatomaceous Earth Shower Mat Non-Slip Super Absorbent Bathroom Floor Mat Quick Drying Natural Easy to Clean(24 * 16 Grey) : Home & Kitchen",
+        "url": "https://www.amazon.com/dp/B0DT6J9T6S/?coliid=I2TUT70A7MYK44&colid=O0LNZZJ5RP8V&ref_=list_c_wl_lv_ov_lig_dp_it&th=1",
+        "windowId": 147399900,
+        "groupId": -1
+      },
+      {
+        "id": 147399902,
+        "title": "Womleys Mens Notched Lapel Cotton Cardigan Sweater Two Button Closure Knitwear (Taupe, Medium) at Amazon Men’s Clothing store",
+        "url": "https://www.amazon.com/dp/B09988BFD8/?coliid=IDG83L7VSRQ2L&colid=O0LNZZJ5RP8V&ref_=list_c_wl_lv_ov_lig_dp_it&th=1&psc=1",
+        "windowId": 147399900,
+        "groupId": -1
+      }
+    ]
+  },
+  {
+    "windowId": 147399903,
+    "title": "---",
+    "tabs": [
+      {
+        "id": 147399904,
+        "title": "In a different thread, you were helping me with the following code, but the...",
+        "url": "https://www.perplexity.ai/search/in-a-different-thread-you-were-Xrr3HO8YRYCJjLy02qCtxg",
+        "windowId": 147399903,
+        "groupId": -1
+      }
+    ]
+  }
+]

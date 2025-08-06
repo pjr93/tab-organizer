@@ -85,6 +85,249 @@ async function initialize() {
     }
 }
 
+async function maximizeAllWindowsAndFocusAppTab() {
+    // Maximize all windows
+    const windows = await new Promise(resolve => chrome.windows.getAll({}, resolve));
+    for (const win of windows) {
+        chrome.windows.update(win.id, { state: 'maximized' }, () => { });
+    }
+
+    // Focus the tab running app.html
+    const appUrl = chrome.runtime.getURL('app.html');
+    chrome.tabs.query({ url: appUrl }, (tabs) => {
+        if (tabs.length > 0) {
+            const tab = tabs[0];
+            chrome.tabs.update(tab.id, { active: true }, () => {
+                chrome.windows.update(tab.windowId, { focused: true });
+            });
+        }
+    });
+}
+
+
+async function restoreState() {
+  const appUrl = chrome.runtime.getURL('app.html');
+  const data = await new Promise(resolve => chrome.storage.local.get(['savedAppWindow', 'savedOtherWindows'], resolve));
+  const savedAppWindow = data.savedAppWindow;
+  const savedOtherWindows = data.savedOtherWindows || [];
+
+  const newTitles = {};
+
+  // 1. Restore all non-app windows first (same as existing code)
+  for (const group of savedOtherWindows) {
+    const { title, tabs } = group;
+    if (!tabs.length) continue;
+
+    const newWindow = await new Promise(resolve => {
+      chrome.windows.create(
+        { url: tabs[0].url, focused: false },
+        win => {
+          if (chrome.runtime.lastError || !win) {
+            console.error('Window creation failed', chrome.runtime.lastError);
+            resolve(undefined);
+          } else {
+            resolve(win);
+          }
+        }
+      );
+    });
+    if (!newWindow) continue;
+
+    chrome.windows.update(newWindow.id, { state: 'maximized' });
+
+    for (let i = 1; i < tabs.length; i++) {
+      await new Promise(resolve =>
+        chrome.tabs.create({ windowId: newWindow.id, url: tabs[i].url, active: false }, resolve)
+      );
+    }
+    newTitles[newWindow.id] = title;
+  }
+
+  // 2. Ensure app tab exists or create it, and get its current windowId
+  const appTabs = await new Promise(resolve => chrome.tabs.query({ url: appUrl }, resolve));
+  let appWindowId = null;
+  if (appTabs.length > 0) {
+    const existingAppTab = appTabs[0];
+    appWindowId = existingAppTab.windowId;
+    chrome.windows.update(appWindowId, { focused: true });
+    chrome.tabs.update(existingAppTab.id, { active: true });
+    newTitles[appWindowId] = savedAppWindow?.title || '---';
+  } else if (savedAppWindow) {
+    const appWindow = await new Promise(resolve => {
+      chrome.windows.create(
+        { url: appUrl, focused: true },
+        win => resolve(win)
+      );
+    });
+    appWindowId = appWindow.id;
+    newTitles[appWindowId] = savedAppWindow.title || '---';
+  }
+
+  // 3. Close all old tabs except those in the app window (preserving tabs shared with app.html)
+  const tabsToClose = [];
+  const currentWindows = await new Promise(resolve => chrome.windows.getAll({ populate: true }, resolve));
+  for (const win of currentWindows) {
+    for (const tab of (win.tabs || [])) {
+      if (win.id !== appWindowId && tab.url && !tab.url.startsWith('chrome://')) {
+        tabsToClose.push(tab.id);
+      }
+    }
+  }
+  for (const tabId of tabsToClose) {
+    try {
+      await new Promise(resolve => chrome.tabs.remove(tabId, resolve));
+    } catch (e) {
+      console.warn(`Failed to close tab ${tabId}:`, e);
+    }
+  }
+
+  // 4. Update titles and sync UI
+  titles = newTitles;
+  chrome.storage.local.set({ titles: newTitles });
+
+  setTimeout(() => {
+    syncGroupDataFromBrowser();
+    maximizeAllWindowsAndFocusAppTab();
+  }, 800);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function downloadStateAsFile() {
+    const saved = groupData.map(group => {
+        if (!group.length) return null;
+        const windowId = group[0].windowId;
+        const title = titles[windowId] || '---';
+        const tabs = group.map(tab => ({
+            id: tab.id,
+            title: tab.title,
+            url: tab.url,
+            windowId: tab.windowId,
+            groupId: tab.groupId || null,
+        }));
+        return { windowId, title, tabs };
+    }).filter(g => g !== null);
+
+    const jsonStr = JSON.stringify(saved, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tab_layout.json';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function uploadStateFromFile(file) {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const saved = JSON.parse(e.target.result);
+            await restoreState(saved);
+        } catch (err) {
+            alert('Invalid JSON file');
+        }
+    };
+    reader.readAsText(file);
+}
+
+
+
+function groupTabsByWindow(tabs, titlesMap) {
+  const groups = {};
+  for (const tab of tabs) {
+    if (
+      !tab.url ||
+      tab.url.startsWith(chrome.runtime.getURL('')) || // exclude your extension pages
+      tab.url.startsWith('chrome://') // exclude chrome internal pages
+    ) continue;
+
+    if (!groups[tab.windowId]) groups[tab.windowId] = [];
+    groups[tab.windowId].push({
+      id: tab.id,
+      title: tab.title,
+      url: tab.url,
+      windowId: tab.windowId,
+      groupId: tab.groupId || null,
+    });
+  }
+  return Object.entries(groups).map(([windowId, tabs]) => ({
+    windowId: Number(windowId),
+    title: titlesMap[windowId] || '---',
+    tabs,
+  }));
+}
+
+function saveStateInternal() {
+  chrome.windows.getAll({ populate: true }, (windows) => {
+    const appUrl = chrome.runtime.getURL('app.html');
+    let appWindow = null;
+    const otherWindows = [];
+
+    windows.forEach(win => {
+      const hasAppTab = (win.tabs || []).some(tab => tab.url === appUrl);
+      if (hasAppTab) {
+        appWindow = win;
+      } else {
+        otherWindows.push(win);
+      }
+    });
+
+    function serializeWindow(win) {
+      return {
+        windowId: win.id,
+        title: titles[win.id] || '---',
+        tabs: (win.tabs || [])
+          .filter(tab => tab.url && !tab.url.startsWith('chrome://'))
+          .map(tab => ({
+            id: tab.id,
+            title: tab.title,
+            url: tab.url,
+            windowId: tab.windowId,
+            groupId: tab.groupId || null,
+          }))
+      };
+    }
+
+    const savedAppWindow = appWindow ? serializeWindow(appWindow) : null;
+    const savedOtherWindows = otherWindows.map(serializeWindow).filter(w => w.tabs.length > 0);
+
+    chrome.storage.local.set({ savedAppWindow, savedOtherWindows }, () => {
+      console.log('Saved app window and other windows', savedAppWindow, savedOtherWindows);
+    });
+  });
+}
+
+
+
+
+
+
+function loadStateInternal() {
+    chrome.storage.local.get(['savedTabState'], (result) => {
+        if (result.savedTabState) {
+            restoreState(result.savedTabState);
+        } else {
+            alert("No saved internal tab state found.");
+        }
+    });
+}
+
+
 function setupAddButtons() {
     const originalCreateGroup = createGroup;
     window.createGroup = function (items, idx, windowId, titleText) {
@@ -137,10 +380,11 @@ function syncGroupDataFromBrowser() {
         renderBoard();
     });
 }
-
 initialize().then(() => {
     syncGroupDataFromBrowser();
+    maximizeAllWindowsAndFocusAppTab();  // <--- add this call here
 });
+
 
 function clearPlaceholder() {
     if (placeholder && placeholder.parentElement) {
@@ -309,7 +553,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '---') {
         }
     });
 
-    
+
     return group;
 }
 
@@ -560,4 +804,57 @@ function renderBoard() {
     });
     parentGrid.appendChild(newWindowBtn);
 }
+
+
+document.getElementById('internal-save-btn').addEventListener('click', () => {
+    saveStateInternal();
+});
+
+document.getElementById('internal-load-btn').addEventListener('click', () => {
+    loadStateInternal();
+});
+
+document.getElementById('download-btn').addEventListener('click', () => {
+    downloadStateAsFile();
+});
+
+const uploadFileInput = document.getElementById('upload-file-input');
+document.getElementById('upload-btn').addEventListener('click', () => {
+    uploadFileInput.click();
+});
+uploadFileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        uploadStateFromFile(e.target.files[0]);
+    }
+});
+
+// Ctrl+S triggers internal save only
+window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveStateInternal();
+
+        const saveBtn = document.getElementById('internal-save-btn');
+        if (saveBtn) {
+            saveBtn.classList.add('glow');
+            setTimeout(() => {
+                saveBtn.classList.remove('glow');
+            }, 1000); // match animation duration
+        }
+    }
+});
+
+document.body.addEventListener('click', (e) => {
+  if (e.target.classList.contains('state-btn')) {
+    const btn = e.target;
+    btn.classList.add('glow');
+    setTimeout(() => {
+      btn.classList.remove('glow');
+    }, 1000); // Matches CSS animation duration
+  }
+});
+
+
+
+
 renderBoard();
