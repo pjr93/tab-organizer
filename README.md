@@ -68,3 +68,18 @@ Internal states are states that are saved in the local chromium storage. You can
 External states are states that are saved locally by a .json file. These have to be sent through downloads and uploads, but otherwise will save and restore all of your tabs
 
 WARNING: I noticed brave://extensions tab not save properly. This might happen with other tabs. Let me know if you notice them
+
+To save internally, press ```ctrl+s``` or click the ```Save (Internal)``` button. Then to load, just click the ```Load (Internal)``` button.
+
+Download JSON will open a dialog window to save your tabs. I recommend navigating to the app folder and saving it in "saved-tabs"
+
+Upload JSON will open a dialog window as well. Navigate to the folder where you saved your tabs and you can load from there.
+
+After doing both Download and Upload at least once will cache that location (at least unless you download or upload something else)
+
+
+# To do
+
+- In line with that very last statement, make downloads and uploads always open from saved-tabs or a preset folder
+- check the issue with brave://extensions not seeming to save
+- refactor
