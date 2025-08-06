@@ -61,11 +61,11 @@ If you drag a tab outside of all the boxes, it will open that tab in a new windo
 
 ## Saving and loading
 
-There are two kinds of save states: internal and download. 
+There are two kinds of save states: **internal** and **download**. 
 
-Internal states are states that are saved in the local chromium storage. You can save and load at will up to 50Mb I believe.
+Internal save states are states that are saved in the local chromium storage. You can save and load at will up to 50Mb I believe.
 
-External states are states that are saved locally by a .json file. These have to be sent through downloads and uploads, but otherwise will save and restore all of your tabs
+Download save states are states that are saved locally by a .json file. These have to be sent through downloads and uploads, but otherwise will save and restore all of your tabs
 
 WARNING: I noticed brave://extensions tab not save properly. This might happen with other tabs. Let me know if you notice them
 
