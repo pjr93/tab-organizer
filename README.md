@@ -82,4 +82,5 @@ After doing both Download and Upload at least once will cache that location (at 
 
 - In line with that very last statement, make downloads and uploads always open from saved-tabs or a preset folder
 - check the issue with brave://extensions not seeming to save
+- add persistences to chosen tabs. I.e. on load it keeps some of your tabs
 - refactor
