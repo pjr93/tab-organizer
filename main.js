@@ -151,7 +151,7 @@ async function restoreState() {
     appWindowId = existingAppTab.windowId;
     chrome.windows.update(appWindowId, { focused: true });
     chrome.tabs.update(existingAppTab.id, { active: true });
-    newTitles[appWindowId] = savedAppWindow?.title || '---';
+    newTitles[appWindowId] = savedAppWindow?.title || '-';
   } else if (savedAppWindow) {
     const appWindow = await new Promise(resolve => {
       chrome.windows.create(
@@ -160,7 +160,7 @@ async function restoreState() {
       );
     });
     appWindowId = appWindow.id;
-    newTitles[appWindowId] = savedAppWindow.title || '---';
+    newTitles[appWindowId] = savedAppWindow.title || '-';
   }
 
   // 3. Close all old tabs except those in the app window (preserving tabs shared with app.html)
@@ -211,7 +211,7 @@ function downloadStateAsFile() {
     const saved = groupData.map(group => {
         if (!group.length) return null;
         const windowId = group[0].windowId;
-        const title = titles[windowId] || '---';
+        const title = titles[windowId] || '-';
         const tabs = group.map(tab => ({
             id: tab.id,
             title: tab.title,
@@ -267,7 +267,7 @@ function groupTabsByWindow(tabs, titlesMap) {
   }
   return Object.entries(groups).map(([windowId, tabs]) => ({
     windowId: Number(windowId),
-    title: titlesMap[windowId] || '---',
+    title: titlesMap[windowId] || '-',
     tabs,
   }));
 }
@@ -290,7 +290,7 @@ function saveStateInternal() {
     function serializeWindow(win) {
       return {
         windowId: win.id,
-        title: titles[win.id] || '---',
+        title: titles[win.id] || '-',
         tabs: (win.tabs || [])
           .filter(tab => tab.url && !tab.url.startsWith('chrome://'))
           .map(tab => ({
@@ -360,7 +360,7 @@ function createEditableTitleBox(parentElement) {
     const title = document.createElement('div');
     title.className = 'editable-title';
     title.contentEditable = 'true';
-    title.textContent = '---';
+    title.textContent = '-';
     parentElement.appendChild(title);
     return title;
 }
@@ -458,7 +458,7 @@ function getDragAfterElement(container, x, y) {
     return afterElement;
 }
 
-function createGroup(items = [], idx, windowId = null, titleText = '---') {
+function createGroup(items = [], idx, windowId = null, titleText = '-') {
     const group = document.createElement('div');
     group.className = 'child-grid';
     group.dataset.group = idx;
@@ -782,7 +782,7 @@ function renderBoard() {
     groupData = groupData.filter(g => g.length);
     groupData.forEach((items, idx) => {
         const windowId = items[0]?.windowId;
-        const titleText = windowId && titles[windowId] ? titles[windowId] : '---';
+        const titleText = windowId && titles[windowId] ? titles[windowId] : '-';
         parentGrid.appendChild(createGroup(items, idx, windowId, titleText));
     });
     const newWindowBtn = document.createElement('button');

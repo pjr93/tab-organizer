@@ -75,7 +75,7 @@ Download JSON will open a dialog window to save your tabs. I recommend navigatin
 
 Upload JSON will open a dialog window as well. Navigate to the folder where you saved your tabs and you can load from there.
 
-After doing both Download and Upload at least once will cache that location (at least unless you download or upload something else)
+Doing Download tehn Upload at least once will cache that location (at least unless you download or upload something else)
 
 
 # To do
