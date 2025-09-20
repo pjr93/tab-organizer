@@ -52,12 +52,35 @@ function hideTabPreview() {
     if (preview) preview.style.display = "none";
 }
 
-let previousActiveTabId = null;
+let currentActiveTabId = null;
+const appUrlPrefix = chrome.runtime.getURL('');
 
-chrome.tabs.onActivated.addListener(activeInfo => {
-    const newActiveTabId = activeInfo.tabId;
-    previousActiveTabId = newActiveTabId;
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        if (!tab.url.startsWith(appUrlPrefix)) {
+            currentActiveTabId = tab.id;
+            highlightActiveTab();
+        } else {
+            currentActiveTabId = null;
+            highlightActiveTab();
+        }
+    } catch (e) {
+        console.warn('Failed to get active tab details', e);
+    }
 });
+
+function highlightActiveTab() {
+    const allItems = document.querySelectorAll('.grid-item');
+    allItems.forEach(item => {
+        if (Number(item.dataset.id) === currentActiveTabId) {
+            item.classList.add('active-tab-glow');
+        } else {
+            item.classList.remove('active-tab-glow');
+        }
+    });
+}
+
 
 async function initialize() {
     try {
@@ -106,106 +129,90 @@ async function maximizeAllWindowsAndFocusAppTab() {
 
 
 async function restoreState() {
-  const appUrl = chrome.runtime.getURL('app.html');
-  const data = await new Promise(resolve => chrome.storage.local.get(['savedAppWindow', 'savedOtherWindows'], resolve));
-  const savedAppWindow = data.savedAppWindow;
-  const savedOtherWindows = data.savedOtherWindows || [];
+    const appUrl = chrome.runtime.getURL('app.html');
+    const data = await new Promise(resolve => chrome.storage.local.get(['savedAppWindow', 'savedOtherWindows'], resolve));
+    const savedAppWindow = data.savedAppWindow;
+    const savedOtherWindows = data.savedOtherWindows || [];
 
-  const newTitles = {};
+    const newTitles = {};
 
-  // 1. Restore all non-app windows first (same as existing code)
-  for (const group of savedOtherWindows) {
-    const { title, tabs } = group;
-    if (!tabs.length) continue;
+    // 1. Restore all non-app windows first (same as existing code)
+    for (const group of savedOtherWindows) {
+        const { title, tabs } = group;
+        if (!tabs.length) continue;
 
-    const newWindow = await new Promise(resolve => {
-      chrome.windows.create(
-        { url: tabs[0].url, focused: false },
-        win => {
-          if (chrome.runtime.lastError || !win) {
-            console.error('Window creation failed', chrome.runtime.lastError);
-            resolve(undefined);
-          } else {
-            resolve(win);
-          }
+        const newWindow = await new Promise(resolve => {
+            chrome.windows.create(
+                { url: tabs[0].url, focused: false },
+                win => {
+                    if (chrome.runtime.lastError || !win) {
+                        console.error('Window creation failed', chrome.runtime.lastError);
+                        resolve(undefined);
+                    } else {
+                        resolve(win);
+                    }
+                }
+            );
+        });
+        if (!newWindow) continue;
+
+        chrome.windows.update(newWindow.id, { state: 'maximized' });
+
+        for (let i = 1; i < tabs.length; i++) {
+            await new Promise(resolve =>
+                chrome.tabs.create({ windowId: newWindow.id, url: tabs[i].url, active: false }, resolve)
+            );
         }
-      );
-    });
-    if (!newWindow) continue;
-
-    chrome.windows.update(newWindow.id, { state: 'maximized' });
-
-    for (let i = 1; i < tabs.length; i++) {
-      await new Promise(resolve =>
-        chrome.tabs.create({ windowId: newWindow.id, url: tabs[i].url, active: false }, resolve)
-      );
+        newTitles[newWindow.id] = title;
     }
-    newTitles[newWindow.id] = title;
-  }
 
-  // 2. Ensure app tab exists or create it, and get its current windowId
-  const appTabs = await new Promise(resolve => chrome.tabs.query({ url: appUrl }, resolve));
-  let appWindowId = null;
-  if (appTabs.length > 0) {
-    const existingAppTab = appTabs[0];
-    appWindowId = existingAppTab.windowId;
-    chrome.windows.update(appWindowId, { focused: true });
-    chrome.tabs.update(existingAppTab.id, { active: true });
-    newTitles[appWindowId] = savedAppWindow?.title || '-';
-  } else if (savedAppWindow) {
-    const appWindow = await new Promise(resolve => {
-      chrome.windows.create(
-        { url: appUrl, focused: true },
-        win => resolve(win)
-      );
-    });
-    appWindowId = appWindow.id;
-    newTitles[appWindowId] = savedAppWindow.title || '-';
-  }
-
-  // 3. Close all old tabs except those in the app window (preserving tabs shared with app.html)
-  const tabsToClose = [];
-  const currentWindows = await new Promise(resolve => chrome.windows.getAll({ populate: true }, resolve));
-  for (const win of currentWindows) {
-    for (const tab of (win.tabs || [])) {
-      if (win.id !== appWindowId && tab.url && !tab.url.startsWith('chrome://')) {
-        tabsToClose.push(tab.id);
-      }
+    // 2. Ensure app tab exists or create it, and get its current windowId
+    const appTabs = await new Promise(resolve => chrome.tabs.query({ url: appUrl }, resolve));
+    let appWindowId = null;
+    if (appTabs.length > 0) {
+        const existingAppTab = appTabs[0];
+        appWindowId = existingAppTab.windowId;
+        chrome.windows.update(appWindowId, { focused: true });
+        chrome.tabs.update(existingAppTab.id, { active: true });
+        newTitles[appWindowId] = savedAppWindow?.title || '-';
+    } else if (savedAppWindow) {
+        const appWindow = await new Promise(resolve => {
+            chrome.windows.create(
+                { url: appUrl, focused: true },
+                win => resolve(win)
+            );
+        });
+        appWindowId = appWindow.id;
+        newTitles[appWindowId] = savedAppWindow.title || '-';
     }
-  }
-  for (const tabId of tabsToClose) {
-    try {
-      await new Promise(resolve => chrome.tabs.remove(tabId, resolve));
-    } catch (e) {
-      console.warn(`Failed to close tab ${tabId}:`, e);
+
+    // 3. Close all old tabs except those in the app window (preserving tabs shared with app.html)
+    const tabsToClose = [];
+    const currentWindows = await new Promise(resolve => chrome.windows.getAll({ populate: true }, resolve));
+    for (const win of currentWindows) {
+        for (const tab of (win.tabs || [])) {
+            if (win.id !== appWindowId && tab.url && !tab.url.startsWith('chrome://')) {
+                tabsToClose.push(tab.id);
+            }
+        }
     }
-  }
+    for (const tabId of tabsToClose) {
+        try {
+            await new Promise(resolve => chrome.tabs.remove(tabId, resolve));
+        } catch (e) {
+            console.warn(`Failed to close tab ${tabId}:`, e);
+        }
+    }
 
-  // 4. Update titles and sync UI
-  titles = newTitles;
-  chrome.storage.local.set({ titles: newTitles });
+    // 4. Update titles and sync UI
+    titles = newTitles;
+    chrome.storage.local.set({ titles: newTitles });
 
-  setTimeout(() => {
-    syncGroupDataFromBrowser();
-    maximizeAllWindowsAndFocusAppTab();
-  }, 800);
+    setTimeout(() => {
+        syncGroupDataFromBrowser();
+        maximizeAllWindowsAndFocusAppTab();
+    }, 800);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 function downloadStateAsFile() {
     const saved = groupData.map(group => {
@@ -246,70 +253,69 @@ function uploadStateFromFile(file) {
 }
 
 
-
 function groupTabsByWindow(tabs, titlesMap) {
-  const groups = {};
-  for (const tab of tabs) {
-    if (
-      !tab.url ||
-      tab.url.startsWith(chrome.runtime.getURL('')) || // exclude your extension pages
-      tab.url.startsWith('chrome://') // exclude chrome internal pages
-    ) continue;
+    const groups = {};
+    for (const tab of tabs) {
+        if (
+            !tab.url ||
+            tab.url.startsWith(chrome.runtime.getURL('')) || // exclude your extension pages
+            tab.url.startsWith('chrome://') // exclude chrome internal pages
+        ) continue;
 
-    if (!groups[tab.windowId]) groups[tab.windowId] = [];
-    groups[tab.windowId].push({
-      id: tab.id,
-      title: tab.title,
-      url: tab.url,
-      windowId: tab.windowId,
-      groupId: tab.groupId || null,
-    });
-  }
-  return Object.entries(groups).map(([windowId, tabs]) => ({
-    windowId: Number(windowId),
-    title: titlesMap[windowId] || '-',
-    tabs,
-  }));
-}
-
-function saveStateInternal() {
-  chrome.windows.getAll({ populate: true }, (windows) => {
-    const appUrl = chrome.runtime.getURL('app.html');
-    let appWindow = null;
-    const otherWindows = [];
-
-    windows.forEach(win => {
-      const hasAppTab = (win.tabs || []).some(tab => tab.url === appUrl);
-      if (hasAppTab) {
-        appWindow = win;
-      } else {
-        otherWindows.push(win);
-      }
-    });
-
-    function serializeWindow(win) {
-      return {
-        windowId: win.id,
-        title: titles[win.id] || '-',
-        tabs: (win.tabs || [])
-          .filter(tab => tab.url && !tab.url.startsWith('chrome://'))
-          .map(tab => ({
+        if (!groups[tab.windowId]) groups[tab.windowId] = [];
+        groups[tab.windowId].push({
             id: tab.id,
             title: tab.title,
             url: tab.url,
             windowId: tab.windowId,
             groupId: tab.groupId || null,
-          }))
-      };
+        });
     }
+    return Object.entries(groups).map(([windowId, tabs]) => ({
+        windowId: Number(windowId),
+        title: titlesMap[windowId] || '-',
+        tabs,
+    }));
+}
 
-    const savedAppWindow = appWindow ? serializeWindow(appWindow) : null;
-    const savedOtherWindows = otherWindows.map(serializeWindow).filter(w => w.tabs.length > 0);
+function saveStateInternal() {
+    chrome.windows.getAll({ populate: true }, (windows) => {
+        const appUrl = chrome.runtime.getURL('app.html');
+        let appWindow = null;
+        const otherWindows = [];
 
-    chrome.storage.local.set({ savedAppWindow, savedOtherWindows }, () => {
-      console.log('Saved app window and other windows', savedAppWindow, savedOtherWindows);
+        windows.forEach(win => {
+            const hasAppTab = (win.tabs || []).some(tab => tab.url === appUrl);
+            if (hasAppTab) {
+                appWindow = win;
+            } else {
+                otherWindows.push(win);
+            }
+        });
+
+        function serializeWindow(win) {
+            return {
+                windowId: win.id,
+                title: titles[win.id] || '-',
+                tabs: (win.tabs || [])
+                    .filter(tab => tab.url && !tab.url.startsWith('chrome://'))
+                    .map(tab => ({
+                        id: tab.id,
+                        title: tab.title,
+                        url: tab.url,
+                        windowId: tab.windowId,
+                        groupId: tab.groupId || null,
+                    }))
+            };
+        }
+
+        const savedAppWindow = appWindow ? serializeWindow(appWindow) : null;
+        const savedOtherWindows = otherWindows.map(serializeWindow).filter(w => w.tabs.length > 0);
+
+        chrome.storage.local.set({ savedAppWindow, savedOtherWindows }, () => {
+            console.log('Saved app window and other windows', savedAppWindow, savedOtherWindows);
+        });
     });
-  });
 }
 
 
@@ -557,13 +563,42 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     return group;
 }
 
+function getFaviconUrl(pageUrl, size = 32) {
+    const url = new URL(chrome.runtime.getURL('_favicon/'));
+    url.searchParams.set('pageUrl', pageUrl);
+    url.searchParams.set('size', size.toString());
+    return url.toString();
+}
+
 function createGridItem(itemObj) {
     const item = document.createElement('div');
-    item.className = 'grid-item';
-    item.textContent = itemObj.text;
+    item.classList.add('grid-item');
+
+    // Create the favicon image element
+    const faviconImg = document.createElement('img');
+    faviconImg.src = getFaviconUrl(itemObj.url, 16); // 16x16 px size is typical for icons
+    faviconImg.alt = 'favicon';
+    faviconImg.style.width = '16px';
+    faviconImg.style.height = '16px';
+    faviconImg.style.marginRight = '6px';
+    faviconImg.style.verticalAlign = 'middle';
+    faviconImg.style.borderRadius = '3px'; // optional styling
+
+    // Create a span for the text content
+    const textSpan = document.createElement('span');
+    textSpan.textContent = itemObj.text;
+
+    // Clear existing content and append favicon + text
+    item.textContent = '';
+    item.appendChild(faviconImg);
+    item.appendChild(textSpan);
+    if (itemObj.id === currentActiveTabId) {
+        item.classList.add('active-tab-glow');
+    }
     if (item.textContent == "Reflection Board") {
         item.style.background = "green";
     }
+
     item.draggable = true;
     item.dataset.id = itemObj.id;
 
@@ -803,6 +838,7 @@ function renderBoard() {
         });
     });
     parentGrid.appendChild(newWindowBtn);
+    highlightActiveTab()
 }
 
 
@@ -845,13 +881,13 @@ window.addEventListener('keydown', (e) => {
 });
 
 document.body.addEventListener('click', (e) => {
-  if (e.target.classList.contains('state-btn')) {
-    const btn = e.target;
-    btn.classList.add('glow');
-    setTimeout(() => {
-      btn.classList.remove('glow');
-    }, 1000); // Matches CSS animation duration
-  }
+    if (e.target.classList.contains('state-btn')) {
+        const btn = e.target;
+        btn.classList.add('glow');
+        setTimeout(() => {
+            btn.classList.remove('glow');
+        }, 1000); // Matches CSS animation duration
+    }
 });
 
 

@@ -9,6 +9,16 @@
             margin: 20px 0 0 24px;
         }
 
+        /* SAVING FOR LATER        .text-with-border {
+            color: white;
+
+            text-shadow:
+                -2px -2px 0 black,
+                2px -2px 0 black,
+                -2px 2px 0 black,
+                2px 2px 0 black;
+        } */
+
         #parent-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -262,7 +272,7 @@
 
         /* Focus outline for accessibility */
         .state-btn:focus {
-            
+
             outline-offset: 2px;
         }
 
@@ -293,6 +303,9 @@
             animation: glowPulse 1s ease forwards;
         }
 
+        .active-tab-glow {
+            animation: glowPulse 2s infinite ease-in-out;
+        }
 
         /* Keep file input hidden */
         input[type="file"] {

@@ -8,7 +8,8 @@
     "windows",
     "storage",
     "nativeMessaging",
-    "activeTab"
+    "activeTab",
+    "favicon"
   ],
   "background": {
     "service_worker": "background.js"
