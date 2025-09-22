@@ -1,4 +1,5 @@
-// In background.js
+
+
 
 chrome.action.onClicked.addListener(() => {
   const appUrl = chrome.runtime.getURL("app.html");
@@ -45,3 +46,23 @@ chrome.tabs.onDetached.addListener(() => notifyAppPages());
 chrome.tabs.onUpdated.addListener(() => notifyAppPages());
 chrome.windows.onCreated.addListener(() => notifyAppPages());
 chrome.windows.onRemoved.addListener(() => notifyAppPages());
+
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    const appUrl = chrome.runtime.getURL("app.html");
+    // Only send update if NOT app.html
+    if (!tab.url.startsWith(appUrl)) {
+      chrome.tabs.query({ url: appUrl }, (tabs) => {
+        for (const t of tabs) {
+          chrome.tabs.sendMessage(t.id, { 
+            type: "active_tab_changed", 
+            tabId: tab.id 
+          });
+        }
+      });
+    }
+  } catch (e) {
+    console.warn("Failed to handle active tab change", e);
+  }
+});

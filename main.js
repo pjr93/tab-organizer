@@ -11,6 +11,8 @@ let windowGroupData = [];
 let titles = {};
 let selectedTabIds = new Set();
 let groupData;
+let currentActiveTabId = null;
+const appUrlPrefix = chrome.runtime.getURL('');
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "sync_browser_state") {
@@ -52,23 +54,7 @@ function hideTabPreview() {
     if (preview) preview.style.display = "none";
 }
 
-let currentActiveTabId = null;
-const appUrlPrefix = chrome.runtime.getURL('');
 
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    try {
-        const tab = await chrome.tabs.get(activeInfo.tabId);
-        if (!tab.url.startsWith(appUrlPrefix)) {
-            currentActiveTabId = tab.id;
-            highlightActiveTab();
-        } else {
-            currentActiveTabId = null;
-            highlightActiveTab();
-        }
-    } catch (e) {
-        console.warn('Failed to get active tab details', e);
-    }
-});
 
 function highlightActiveTab() {
     const allItems = document.querySelectorAll('.grid-item');
@@ -80,6 +66,16 @@ function highlightActiveTab() {
         }
     });
 }
+
+chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === "active_tab_changed") {
+        currentActiveTabId = message.tabId;
+        highlightActiveTab();
+    }
+    if (message.type === "sync_browser_state") {
+        syncGroupDataFromBrowser();
+    }
+});
 
 
 async function initialize() {
@@ -126,7 +122,6 @@ async function maximizeAllWindowsAndFocusAppTab() {
         }
     });
 }
-
 
 async function restoreState() {
     const appUrl = chrome.runtime.getURL('app.html');
@@ -214,8 +209,8 @@ async function restoreState() {
     }, 800);
 }
 
-function downloadStateAsFile() {
-    const saved = groupData.map(group => {
+function downloadStateAsFile(groups = groupData) {
+    const saved = groups.map(group => {
         if (!group.length) return null;
         const windowId = group[0].windowId;
         const title = titles[windowId] || '-';
@@ -377,7 +372,7 @@ function syncGroupDataFromBrowser() {
         groupData = windows.map(win => {
             return (win.tabs || []).map(tab => ({
                 id: tab.id,
-                text: tab.title ? tab.title.slice(0, 20) : tab.url || "No title",
+                text: tab.title ? tab.title.slice(0, 16) : tab.url || "No title",
                 windowId: win.id,
                 groupId: tab.groupId || null,
                 ...tab
@@ -545,7 +540,23 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     });
     group.appendChild(deleteBtn);
 
+    // Save group button
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'group-save-btn';
+    saveBtn.textContent = 'S';
+    saveBtn.title = 'Save this window group';
+    
+    saveBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const groupDataToSave = groupData[idx];
+        if (groupDataToSave && groupDataToSave.length > 0) {
+            downloadStateAsFile([groupDataToSave]);
+        }
+    });
+    group.appendChild(saveBtn);
+
     for (const itemObj of items) {
+        console.log('item obj:',itemObj)
         group.appendChild(createGridItem(itemObj));
     }
 
@@ -807,11 +818,6 @@ outsideOverlay.addEventListener('drop', ev => {
     selectedTabIds.clear();
 });
 
-
-
-
-
-
 function renderBoard() {
     parentGrid.innerHTML = '';
     groupData = groupData.filter(g => g.length);
@@ -840,7 +846,6 @@ function renderBoard() {
     parentGrid.appendChild(newWindowBtn);
     highlightActiveTab()
 }
-
 
 document.getElementById('internal-save-btn').addEventListener('click', () => {
     saveStateInternal();
@@ -889,8 +894,5 @@ document.body.addEventListener('click', (e) => {
         }, 1000); // Matches CSS animation duration
     }
 });
-
-
-
 
 renderBoard();

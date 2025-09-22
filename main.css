@@ -49,7 +49,7 @@
         .grid-item {
             height: 30px;
             min-height: 30px;
-            padding: 6px 40px 6px 12px;
+            padding: 6px 20px 6px 12px;
             /* Add extra right padding (e.g. 40px) for delete button */
             font-size: 14px;
             font-weight: bold;
@@ -142,6 +142,41 @@
             opacity: 1;
         }
 
+        .group-save-btn {
+            position: absolute;
+            top: 50px;
+            right: 6px;
+            width: 22px;
+            height: 22px;
+            background-color: black;
+            border: 2px solid #666;
+            color: #666;
+            font-weight: bold;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 20px;
+            user-select: none;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            z-index: 10;
+            transition: opacity 0.2s ease;
+        }
+
+        .group-save-btn:hover {
+            background: green;
+            /* optionally give it a distinct hover color instead of red */
+        }
+
+        .child-grid:hover>.group-save-btn {
+            display: flex;
+            opacity: 1;
+        }
+
+
+
         .placeholder {
             box-sizing: border-box;
             min-height: 37px;
@@ -154,7 +189,7 @@
 
         .plus-tab-btn {
             position: absolute;
-            bottom: 6px;
+            top: 28px;
             right: 6px;
             width: 22px;
             height: 22px;
