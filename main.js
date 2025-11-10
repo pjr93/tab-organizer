@@ -10,7 +10,8 @@ let nextItemId = 1;
 let windowGroupData = [];
 let titles = {};
 let selectedTabIds = new Set();
-let groupData;
+let groupData; //probably should be json object
+let windowData;
 let currentActiveTabId = null;
 const appUrlPrefix = chrome.runtime.getURL('');
 
@@ -54,8 +55,6 @@ function hideTabPreview() {
     if (preview) preview.style.display = "none";
 }
 
-
-
 function highlightActiveTab() {
     const allItems = document.querySelectorAll('.grid-item');
     allItems.forEach(item => {
@@ -67,6 +66,7 @@ function highlightActiveTab() {
     });
 }
 
+// message events - highlightActiveTab - syncGroupDataFromBrowser
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === "active_tab_changed") {
         currentActiveTabId = message.tabId;
@@ -77,11 +77,13 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 });
 
-
+//gets tab and window data from the browser, processes it and sets it to groupData - renderBoard / probably could go as an async call but maybe that's unnecessary
 async function initialize() {
     try {
         const windowsData = await chrome.storage.local.get(['windows']);
-        const titlesData = await chrome.storage.local.get(['titles']);
+        const titlesData = await chrome.storage.local.get(['titles']); //probably fails here
+        console.log('windowsData:',windowsData)
+        console.log('titlesData:',titlesData)
         if (titlesData && titlesData.titles) {
             titles = titlesData.titles;
         }
@@ -92,7 +94,7 @@ async function initialize() {
                 .filter(tab => tab && typeof tab.title === 'string')
                 .map(tab => ({
                     id: tab.id,
-                    text: tab.title.slice(0, 20),
+                    text: tab.title,
                     ...tab
                 }));
         });
@@ -103,7 +105,7 @@ async function initialize() {
         renderBoard();
     }
 }
-
+//straightfoward I think. Must be async due to the async nature of chrome.windows.getAll
 async function maximizeAllWindowsAndFocusAppTab() {
     // Maximize all windows
     const windows = await new Promise(resolve => chrome.windows.getAll({}, resolve));
@@ -123,6 +125,9 @@ async function maximizeAllWindowsAndFocusAppTab() {
     });
 }
 
+
+// I think this function can go. It should just be another initialization, but with different parameters = TRY 1 - syncGroupDataFromBrowser - maximizeAllWindowsAndFocusAppTab
+        
 async function restoreState() {
     const appUrl = chrome.runtime.getURL('app.html');
     const data = await new Promise(resolve => chrome.storage.local.get(['savedAppWindow', 'savedOtherWindows'], resolve));
@@ -209,6 +214,8 @@ async function restoreState() {
     }, 800);
 }
 
+
+// this needs to be adapted for a per window basis - would there be an advantage in putting the data organization separate?
 function downloadStateAsFile(groups = groupData) {
     const saved = groups.map(group => {
         if (!group.length) return null;
@@ -234,6 +241,7 @@ function downloadStateAsFile(groups = groupData) {
     URL.revokeObjectURL(url);
 }
 
+//requires restoreState so I need to alter it
 function uploadStateFromFile(file) {
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -247,14 +255,13 @@ function uploadStateFromFile(file) {
     reader.readAsText(file);
 }
 
-
 function groupTabsByWindow(tabs, titlesMap) {
     const groups = {};
     for (const tab of tabs) {
         if (
             !tab.url ||
             tab.url.startsWith(chrome.runtime.getURL('')) || // exclude your extension pages
-            tab.url.startsWith('chrome://') // exclude chrome internal pages
+            tab.url.startsWith('brave://') // exclude chrome internal pages (should I really?)
         ) continue;
 
         if (!groups[tab.windowId]) groups[tab.windowId] = [];
@@ -313,11 +320,7 @@ function saveStateInternal() {
     });
 }
 
-
-
-
-
-
+//loads the state from local storage - restoreState
 function loadStateInternal() {
     chrome.storage.local.get(['savedTabState'], (result) => {
         if (result.savedTabState) {
@@ -328,7 +331,7 @@ function loadStateInternal() {
     });
 }
 
-
+//just the + button - createGroup - syncGroupDataFromBrowser
 function setupAddButtons() {
     const originalCreateGroup = createGroup;
     window.createGroup = function (items, idx, windowId, titleText) {
@@ -366,14 +369,15 @@ function createEditableTitleBox(parentElement) {
     return title;
 }
 
+//Gets tab data from the chrome API - renderBoard
 function syncGroupDataFromBrowser() {
     chrome.windows.getAll({ populate: true }, (windows) => {
         if (chrome.runtime.lastError) return;
         groupData = windows.map(win => {
             return (win.tabs || []).map(tab => ({
-                id: tab.id,
-                text: tab.title ? tab.title.slice(0, 16) : tab.url || "No title",
-                windowId: win.id,
+                id: tab.id, // also seems redundant
+                text: tab.title ? tab.title : tab.url || "No title",
+                windowId: win.id, //this is redundant
                 groupId: tab.groupId || null,
                 ...tab
             }));
@@ -381,11 +385,42 @@ function syncGroupDataFromBrowser() {
         renderBoard();
     });
 }
+
+// the initial function
 initialize().then(() => {
     syncGroupDataFromBrowser();
     maximizeAllWindowsAndFocusAppTab();  // <--- add this call here
 });
 
+function getFaviconUrl(pageUrl, size = 32) {
+    const url = new URL(chrome.runtime.getURL('_favicon/'));
+    url.searchParams.set('pageUrl', pageUrl);
+    url.searchParams.set('size', size.toString());
+    return url.toString();
+}
+
+//edge case for dragging - hideDropIndicator - deactivateOutsideOverlay - showDropIndicator - activateOutsideOverlay
+function onDragAnywhere(ev) {
+    const grids = Array.from(document.elementsFromPoint(ev.clientX, ev.clientY))
+        .filter(e => e.classList && e.classList.contains('child-grid'));
+    if (grids.length === 0 && draggedItem) {
+        showDropIndicator(ev.clientX, ev.clientY);
+        activateOutsideOverlay();
+    } else {
+        hideDropIndicator();
+        deactivateOutsideOverlay();
+    }
+}
+
+function showDropIndicator(x, y) {
+    dropIndicator.style.display = 'block';
+    dropIndicator.style.left = (x + 14) + 'px';
+    dropIndicator.style.top = (y - 28) + 'px';
+}
+
+function hideDropIndicator() {
+    dropIndicator.style.display = 'none';
+}
 
 function clearPlaceholder() {
     if (placeholder && placeholder.parentElement) {
@@ -394,6 +429,7 @@ function clearPlaceholder() {
     }
 }
 
+//moves to a new window - syncGroupDataFromBrowser
 function smartMoveTab(tabId, targetWindowId, targetIndex) {
     if (targetWindowId == null) {
         chrome.windows.getCurrent((prevWindow) => {
@@ -459,6 +495,7 @@ function getDragAfterElement(container, x, y) {
     return afterElement;
 }
 
+// creates the group UI element which holds the tabs - createPlaceholder - removeFromGroupData - smartMoveTab - renderBoard - hideDropIndicator - deactivateOutsideOverlay - syncGroupDataFromBrowser - downloadStateAsFile - createGridItem - createEditableTextbox
 function createGroup(items = [], idx, windowId = null, titleText = '-') {
     const group = document.createElement('div');
     group.className = 'child-grid';
@@ -556,7 +593,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     group.appendChild(saveBtn);
 
     for (const itemObj of items) {
-        console.log('item obj:',itemObj)
+        //console.log('item obj:',itemObj)
         group.appendChild(createGridItem(itemObj));
     }
 
@@ -574,16 +611,12 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     return group;
 }
 
-function getFaviconUrl(pageUrl, size = 32) {
-    const url = new URL(chrome.runtime.getURL('_favicon/'));
-    url.searchParams.set('pageUrl', pageUrl);
-    url.searchParams.set('size', size.toString());
-    return url.toString();
-}
-
+//creates the tab UI element - onDragAnywhere - hideDropIndicator - deactivateOutsideOverlay - clearPlaceholder - showTabPreview - hideTabPreview
 function createGridItem(itemObj) {
+    // Container
     const item = document.createElement('div');
     item.classList.add('grid-item');
+    
 
     // Create the favicon image element
     const faviconImg = document.createElement('img');
@@ -598,7 +631,8 @@ function createGridItem(itemObj) {
     // Create a span for the text content
     const textSpan = document.createElement('span');
     textSpan.textContent = itemObj.text;
-
+    
+    
     // Clear existing content and append favicon + text
     item.textContent = '';
     item.appendChild(faviconImg);
@@ -655,7 +689,6 @@ function createGridItem(itemObj) {
         // Update lastSelectedIndex to current for next shift-click
         lastSelectedIndex = currentIndex;
     });
-
 
     item.addEventListener('dragstart', e => {
         if (!selectedTabIds.has(itemObj.id)) {
@@ -734,28 +767,9 @@ function getItemById(id) {
     return null;
 }
 
-function onDragAnywhere(ev) {
-    const grids = Array.from(document.elementsFromPoint(ev.clientX, ev.clientY))
-        .filter(e => e.classList && e.classList.contains('child-grid'));
-    if (grids.length === 0 && draggedItem) {
-        showDropIndicator(ev.clientX, ev.clientY);
-        activateOutsideOverlay();
-    } else {
-        hideDropIndicator();
-        deactivateOutsideOverlay();
-    }
-}
 
-function showDropIndicator(x, y) {
-    dropIndicator.style.display = 'block';
-    dropIndicator.style.left = (x + 14) + 'px';
-    dropIndicator.style.top = (y - 28) + 'px';
-}
 
-function hideDropIndicator() {
-    dropIndicator.style.display = 'none';
-}
-
+//these are functions for the overlay element when dragging 
 function activateOutsideOverlay() {
     outsideOverlay.classList.add('active');
 }
@@ -766,6 +780,8 @@ function deactivateOutsideOverlay() {
 
 outsideOverlay.addEventListener('dragenter', e => e.preventDefault());
 outsideOverlay.addEventListener('dragover', e => e.preventDefault());
+
+// removeFromGroupData - getItemById - syncGroupDataFromBrowser - renderBoard - hideDropIndicator - deactivateOutsideOverlay
 outsideOverlay.addEventListener('drop', ev => {
     ev.preventDefault();
     if (!draggedItem || draggedId == null) return;
@@ -818,6 +834,7 @@ outsideOverlay.addEventListener('drop', ev => {
     selectedTabIds.clear();
 });
 
+//render the board - syncGroupDataFromBrowser - highlightActiveTab
 function renderBoard() {
     parentGrid.innerHTML = '';
     groupData = groupData.filter(g => g.length);
@@ -826,6 +843,10 @@ function renderBoard() {
         const titleText = windowId && titles[windowId] ? titles[windowId] : '-';
         parentGrid.appendChild(createGroup(items, idx, windowId, titleText));
     });
+    // create a new window
+    // because of the issue with updating, first create a new window that is maximized, then return to the previous window (so interaction with reflection board is not interrupted)
+    // finally, just resync the state with background.js
+
     const newWindowBtn = document.createElement('button');
     newWindowBtn.className = 'new-window-btn';
     newWindowBtn.textContent = '+';
@@ -845,6 +866,7 @@ function renderBoard() {
     });
     parentGrid.appendChild(newWindowBtn);
     highlightActiveTab()
+    console.log(groupData)
 }
 
 document.getElementById('internal-save-btn').addEventListener('click', () => {
