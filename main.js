@@ -2,6 +2,7 @@ const parentGrid = document.getElementById('parent-grid');
 const dropIndicator = document.getElementById('drop-indicator');
 const outsideOverlay = document.getElementById('outside-overlay');
 
+//probably want hash maps here
 let lastSelectedIndex = null;
 let draggedItem = null;
 let draggedId = null;
@@ -15,11 +16,9 @@ let windowData;
 let currentActiveTabId = null;
 const appUrlPrefix = chrome.runtime.getURL('');
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === "sync_browser_state") {
-        syncGroupDataFromBrowser();
-    }
-});
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function showTabPreview(tab, anchorEl) {
     let preview = document.getElementById('tab-hover-preview');
@@ -65,7 +64,6 @@ function highlightActiveTab() {
         }
     });
 }
-
 // message events - highlightActiveTab - syncGroupDataFromBrowser
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === "active_tab_changed") {
@@ -77,34 +75,6 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 });
 
-//gets tab and window data from the browser, processes it and sets it to groupData - renderBoard / probably could go as an async call but maybe that's unnecessary
-async function initialize() {
-    try {
-        const windowsData = await chrome.storage.local.get(['windows']);
-        const titlesData = await chrome.storage.local.get(['titles']); //probably fails here
-        console.log('windowsData:',windowsData)
-        console.log('titlesData:',titlesData)
-        if (titlesData && titlesData.titles) {
-            titles = titlesData.titles;
-        }
-        const windows = windowsData.windows || [];
-        windowGroupData = windows.map(window => {
-            if (!window.tabs) return [];
-            return window.tabs
-                .filter(tab => tab && typeof tab.title === 'string')
-                .map(tab => ({
-                    id: tab.id,
-                    text: tab.title,
-                    ...tab
-                }));
-        });
-        groupData = windowGroupData.length ? windowGroupData : [[]];
-        renderBoard();
-    } catch (err) {
-        groupData = [[]];
-        renderBoard();
-    }
-}
 //straightfoward I think. Must be async due to the async nature of chrome.windows.getAll
 async function maximizeAllWindowsAndFocusAppTab() {
     // Maximize all windows
@@ -115,7 +85,7 @@ async function maximizeAllWindowsAndFocusAppTab() {
 
     // Focus the tab running app.html
     const appUrl = chrome.runtime.getURL('app.html');
-    chrome.tabs.query({ url: appUrl }, (tabs) => {
+    chrome.tabs.query({ url: appUrl }, (tabs) => { //should only be one
         if (tabs.length > 0) {
             const tab = tabs[0];
             chrome.tabs.update(tab.id, { active: true }, () => {
@@ -125,97 +95,99 @@ async function maximizeAllWindowsAndFocusAppTab() {
     });
 }
 
-
 // I think this function can go. It should just be another initialization, but with different parameters = TRY 1 - syncGroupDataFromBrowser - maximizeAllWindowsAndFocusAppTab
-        
-async function restoreState() {
-    const appUrl = chrome.runtime.getURL('app.html');
-    const data = await new Promise(resolve => chrome.storage.local.get(['savedAppWindow', 'savedOtherWindows'], resolve));
-    const savedAppWindow = data.savedAppWindow;
-    const savedOtherWindows = data.savedOtherWindows || [];
-
-    const newTitles = {};
-
-    // 1. Restore all non-app windows first (same as existing code)
-    for (const group of savedOtherWindows) {
-        const { title, tabs } = group;
-        if (!tabs.length) continue;
-
-        const newWindow = await new Promise(resolve => {
-            chrome.windows.create(
-                { url: tabs[0].url, focused: false },
-                win => {
-                    if (chrome.runtime.lastError || !win) {
-                        console.error('Window creation failed', chrome.runtime.lastError);
-                        resolve(undefined);
-                    } else {
-                        resolve(win);
-                    }
-                }
-            );
-        });
-        if (!newWindow) continue;
-
-        chrome.windows.update(newWindow.id, { state: 'maximized' });
-
-        for (let i = 1; i < tabs.length; i++) {
-            await new Promise(resolve =>
-                chrome.tabs.create({ windowId: newWindow.id, url: tabs[i].url, active: false }, resolve)
-            );
-        }
-        newTitles[newWindow.id] = title;
-    }
-
-    // 2. Ensure app tab exists or create it, and get its current windowId
-    const appTabs = await new Promise(resolve => chrome.tabs.query({ url: appUrl }, resolve));
-    let appWindowId = null;
-    if (appTabs.length > 0) {
-        const existingAppTab = appTabs[0];
-        appWindowId = existingAppTab.windowId;
-        chrome.windows.update(appWindowId, { focused: true });
-        chrome.tabs.update(existingAppTab.id, { active: true });
-        newTitles[appWindowId] = savedAppWindow?.title || '-';
-    } else if (savedAppWindow) {
-        const appWindow = await new Promise(resolve => {
-            chrome.windows.create(
-                { url: appUrl, focused: true },
-                win => resolve(win)
-            );
-        });
-        appWindowId = appWindow.id;
-        newTitles[appWindowId] = savedAppWindow.title || '-';
-    }
-
-    // 3. Close all old tabs except those in the app window (preserving tabs shared with app.html)
-    const tabsToClose = [];
-    const currentWindows = await new Promise(resolve => chrome.windows.getAll({ populate: true }, resolve));
-    for (const win of currentWindows) {
-        for (const tab of (win.tabs || [])) {
-            if (win.id !== appWindowId && tab.url && !tab.url.startsWith('chrome://')) {
-                tabsToClose.push(tab.id);
+// or I can write it myself to first close every tab except reflection board. Then load the windows with the first tab of each one. The reflection board can be saved, but
+//if the reflection board is detected on load, it does not make a new window. When creating the tabs, it first needs to check if app.html is a part of the list of tabs
+function createWindow(options) {
+    return new Promise((resolve, reject) => {
+        chrome.windows.create(options, (newWindow) => {
+            if (chrome.runtime.lastError || !newWindow) {
+                reject(chrome.runtime.lastError || new Error("Failed to create window"));
+            } else {
+                resolve(newWindow);
             }
-        }
-    }
-    for (const tabId of tabsToClose) {
+        });
+    });
+}
+
+function createTab(options) {
+    return new Promise((resolve, reject) => {
+        chrome.tabs.create(options, (tab) => {
+            if (chrome.runtime.lastError || !tab) {
+                reject(chrome.runtime.lastError || new Error("Failed to create tab"));
+            } else {
+                resolve(tab);
+            }
+        });
+    });
+}
+
+function restoreState(firstToClose, restToClose, saved) {
+    console.log('firstToClose:', firstToClose)
+
+    const appUrl = chrome.runtime.getURL('app.html');
+
+    //close all but app.html
+    for (const tabId of firstToClose) {
         try {
-            await new Promise(resolve => chrome.tabs.remove(tabId, resolve));
+            chrome.tabs.remove(tabId);
         } catch (e) {
             console.warn(`Failed to close tab ${tabId}:`, e);
         }
     }
 
-    // 4. Update titles and sync UI
-    titles = newTitles;
-    chrome.storage.local.set({ titles: newTitles });
+    for (const tabId of restToClose) {
+        try {
+            chrome.tabs.remove(tabId);
+        } catch (e) {
+            console.warn(`Failed to close tab ${tabId}:`, e);
+        }
+    }
 
-    setTimeout(() => {
-        syncGroupDataFromBrowser();
+    
+    //open from the saved object
+    /* 
+        chrome.runtime.sendMessage({ type: "toggleListener", active: false }, (response) => {
+    
+        }); */
+
+    //if you click out of it at lightning speed it could break which is the correct prevWindow
+    try {
+
+        var i = 0;
+        for (const win of saved) {
+            chrome.windows.getCurrent((prevWindow) => {
+                chrome.windows.create(
+                    { state: "maximized", focused: true },
+                    (newWindow) => {
+                        chrome.windows.update(prevWindow.id, { focused: true }, () => {
+                            var windowId = newWindow.id
+                            for (const tab of win.tabs) {
+                                if (tab.title != "Reflection Board") {
+                                    chrome.tabs.create({ windowId: windowId, url: tab.url, active: false }, () => { });
+                                }
+                            }
+                        });
+                    }
+                );
+            });
+            i++
+        }
+
+    } catch (error) {
+        console.error("Error restoring windows and tabs:", error);
+    }
+
+    
+
+/*     setTimeout(() => {
+        syncGroupDataFromBrowser()
         maximizeAllWindowsAndFocusAppTab();
-    }, 800);
+    }, 2000); */
 }
 
-
-// this needs to be adapted for a per window basis - would there be an advantage in putting the data organization separate?
+// this needs to be adapted for a per window basis - would there be an advantage in putting the data organization separate? - yes for saving individual windows
+//
 function downloadStateAsFile(groups = groupData) {
     const saved = groups.map(group => {
         if (!group.length) return null;
@@ -244,18 +216,84 @@ function downloadStateAsFile(groups = groupData) {
 //requires restoreState so I need to alter it
 function uploadStateFromFile(file) {
     const reader = new FileReader();
+
     reader.onload = async (e) => {
+
         try {
             const saved = JSON.parse(e.target.result);
-            await restoreState(saved);
+            const appTitle = 'Reflection Board'
+            console.log('saved:', saved, typeof (saved))
+            console.log('groupData:', groupData)
+            var appLocation = {}
+            var i = 0
+            for (win of saved) {
+
+                var j = 0
+                for (tab of win.tabs) {
+                    if (tab.title == appTitle) {
+                        appLocation.winId = tab.windowId
+                        appLocation.tabId = tab.id
+                        appLocation.url = tab.url
+                        appLocation.appPosition = [i, j]
+                    }
+                    j++
+                }
+                i++
+            }
+
+            var currentAppLocation = {}
+            var k = 0
+            for (group of groupData) {
+
+                var m = 0
+                for (item of group) {
+                    if (item.title == appTitle) {
+                        currentAppLocation.winId = item.windowId
+                        currentAppLocation.tabId = item.id
+                        currentAppLocation.url = item.url
+                        currentAppLocation.appPosition = [k, m]
+                    }
+                    m++
+                }
+                k++
+            }
+
+            var instructions = {}
+
+            //first deleting tabs around the current app.html
+
+            instructions.firstToClose = null
+            k = currentAppLocation.appPosition[0]
+            m = currentAppLocation.appPosition[1]
+            console.log(' k:', k, 'm:', m)
+            firstToClose = groupData[k].filter(element => element.title != appTitle).map(element => element.id)
+            console.log(firstToClose)
+
+            //close everything else
+
+            restToCloseArr = groupData.filter((element, idx) => idx != k)
+
+
+            console.log('upload restToCloseArr:', restToCloseArr)
+            var restToClose = []
+            for (tabs of restToCloseArr) {
+                console.log(tabs)
+
+                restToClose = restToClose.concat(tabs.map(tab => tab.id))
+            }
+            console.log('upload restToClose:', restToClose)
+            restoreState(firstToClose, restToClose, saved);
+            
         } catch (err) {
-            alert('Invalid JSON file');
+            alert('check the console after pressing F12');
+            console.log(err)
         }
     };
     reader.readAsText(file);
+    
 }
 
-function groupTabsByWindow(tabs, titlesMap) {
+function groupTabsByWindow(tabs, titlesMap) { //I think the titles map here is annoying. the tabs should be sufficient (which is why group data should have this stuff. This should take the window object and get the tabs from there)
     const groups = {};
     for (const tab of tabs) {
         if (
@@ -331,34 +369,6 @@ function loadStateInternal() {
     });
 }
 
-//just the + button - createGroup - syncGroupDataFromBrowser
-function setupAddButtons() {
-    const originalCreateGroup = createGroup;
-    window.createGroup = function (items, idx, windowId, titleText) {
-        const group = originalCreateGroup(items, idx, windowId, titleText);
-        const plusTabBtn = document.createElement('button');
-        plusTabBtn.className = 'plus-tab-btn';
-        plusTabBtn.textContent = '+';
-        plusTabBtn.title = "Add new tab";
-        plusTabBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (windowId != null) {
-                chrome.tabs.create({ windowId: windowId, active: false }, () => {
-                    syncGroupDataFromBrowser();
-                });
-            }
-        });
-        group.appendChild(plusTabBtn);
-        group.addEventListener('mouseenter', () => {
-            plusTabBtn.style.display = 'flex';
-        });
-        group.addEventListener('mouseleave', () => {
-            plusTabBtn.style.display = 'none';
-        });
-        return group;
-    };
-}
-setupAddButtons();
 
 function createEditableTitleBox(parentElement) {
     const title = document.createElement('div');
@@ -386,11 +396,7 @@ function syncGroupDataFromBrowser() {
     });
 }
 
-// the initial function
-initialize().then(() => {
-    syncGroupDataFromBrowser();
-    maximizeAllWindowsAndFocusAppTab();  // <--- add this call here
-});
+
 
 function getFaviconUrl(pageUrl, size = 32) {
     const url = new URL(chrome.runtime.getURL('_favicon/'));
@@ -501,6 +507,21 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     group.className = 'child-grid';
     group.dataset.group = idx;
 
+
+    const plusTabBtn = document.createElement('button');
+    plusTabBtn.className = 'plus-tab-btn';
+    plusTabBtn.textContent = '+';
+    plusTabBtn.title = "Add new tab";
+    plusTabBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (windowId != null) {
+            chrome.tabs.create({ windowId: windowId, active: false }, () => {
+                syncGroupDataFromBrowser();
+            });
+        }
+    });
+    group.appendChild(plusTabBtn);
+
     group.addEventListener('dragover', e => {
         e.preventDefault();
         group.classList.add('dragover');
@@ -582,7 +603,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     saveBtn.className = 'group-save-btn';
     saveBtn.textContent = 'S';
     saveBtn.title = 'Save this window group';
-    
+
     saveBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const groupDataToSave = groupData[idx];
@@ -616,7 +637,7 @@ function createGridItem(itemObj) {
     // Container
     const item = document.createElement('div');
     item.classList.add('grid-item');
-    
+
 
     // Create the favicon image element
     const faviconImg = document.createElement('img');
@@ -631,8 +652,8 @@ function createGridItem(itemObj) {
     // Create a span for the text content
     const textSpan = document.createElement('span');
     textSpan.textContent = itemObj.text;
-    
-    
+
+
     // Clear existing content and append favicon + text
     item.textContent = '';
     item.appendChild(faviconImg);
@@ -743,7 +764,7 @@ function createGridItem(itemObj) {
     return item;
 }
 
-function removeFromGroupData(id) {
+function removeFromGroupData(id) { //hash is useable here
     for (const group of groupData) {
         const index = group.findIndex(item => item.id === id);
         if (index !== -1) {
@@ -758,7 +779,7 @@ function removeFromGroupData(id) {
     }
 }
 
-function getItemById(id) {
+function getItemById(id) { //this is what needs to be replaced by a hash
     for (const group of groupData) {
         for (const item of group) {
             if (item.id === id) return item;
@@ -866,15 +887,17 @@ function renderBoard() {
     });
     parentGrid.appendChild(newWindowBtn);
     highlightActiveTab()
-    console.log(groupData)
+    //console.log("groupData:", groupData)
 }
 
 document.getElementById('internal-save-btn').addEventListener('click', () => {
-    saveStateInternal();
+    //saveStateInternal();
+    console.log('not today criminal!')
 });
 
 document.getElementById('internal-load-btn').addEventListener('click', () => {
-    loadStateInternal();
+    //loadStateInternal();
+    console.log('not today criminal!')
 });
 
 document.getElementById('download-btn').addEventListener('click', () => {
