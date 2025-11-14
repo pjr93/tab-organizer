@@ -122,12 +122,38 @@ function createTab(options) {
     });
 }
 
-function restoreState(firstToClose, restToClose, saved) {
-    console.log('firstToClose:', firstToClose)
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function openTabsSequentially(tabs, windowId) {
+    for (const tab of tabs) {
+        if (tab.title !== "Reflection Board") {
+            chrome.tabs.create({ windowId, url: tab.url, active: false });
+            await sleep(500); // wait 1 second before next tab
+        }
+    }
+}
+
+function getCurrentWindow() {
+    return new Promise(resolve => chrome.windows.getCurrent(resolve));
+}
+
+function createWindow() {
+    return new Promise(resolve => chrome.windows.create({ state: "maximized", focused: true }, resolve));
+}
+
+function updateWindow(windowId) {
+    return new Promise(resolve => chrome.windows.update(windowId, { focused: true }, resolve));
+}
+
+// Assume openTabsSequentially is async and returns a Promise that resolves when done
+async function restoreState(firstToClose, restToClose, saved) {
+    console.log('firstToClose:', firstToClose);
 
     const appUrl = chrome.runtime.getURL('app.html');
 
-    //close all but app.html
+    // Close tabs synchronously without awaiting since tabs.remove accepts callback but can be fire and forget
     for (const tabId of firstToClose) {
         try {
             chrome.tabs.remove(tabId);
@@ -135,7 +161,6 @@ function restoreState(firstToClose, restToClose, saved) {
             console.warn(`Failed to close tab ${tabId}:`, e);
         }
     }
-
     for (const tabId of restToClose) {
         try {
             chrome.tabs.remove(tabId);
@@ -144,46 +169,16 @@ function restoreState(firstToClose, restToClose, saved) {
         }
     }
 
-    
-    //open from the saved object
-    /* 
-        chrome.runtime.sendMessage({ type: "toggleListener", active: false }, (response) => {
-    
-        }); */
-
-    //if you click out of it at lightning speed it could break which is the correct prevWindow
     try {
-
-        var i = 0;
         for (const win of saved) {
-            chrome.windows.getCurrent((prevWindow) => {
-                chrome.windows.create(
-                    { state: "maximized", focused: true },
-                    (newWindow) => {
-                        chrome.windows.update(prevWindow.id, { focused: true }, () => {
-                            var windowId = newWindow.id
-                            for (const tab of win.tabs) {
-                                if (tab.title != "Reflection Board") {
-                                    chrome.tabs.create({ windowId: windowId, url: tab.url, active: false }, () => { });
-                                }
-                            }
-                        });
-                    }
-                );
-            });
-            i++
+            const prevWindow = await getCurrentWindow();
+            const newWindow = await createWindow();
+            await updateWindow(prevWindow.id);
+            await openTabsSequentially(win.tabs, newWindow.id);
         }
-
     } catch (error) {
         console.error("Error restoring windows and tabs:", error);
     }
-
-    
-
-/*     setTimeout(() => {
-        syncGroupDataFromBrowser()
-        maximizeAllWindowsAndFocusAppTab();
-    }, 2000); */
 }
 
 // this needs to be adapted for a per window basis - would there be an advantage in putting the data organization separate? - yes for saving individual windows
@@ -283,14 +278,13 @@ function uploadStateFromFile(file) {
             }
             console.log('upload restToClose:', restToClose)
             restoreState(firstToClose, restToClose, saved);
-            
         } catch (err) {
             alert('check the console after pressing F12');
             console.log(err)
         }
     };
     reader.readAsText(file);
-    
+
 }
 
 function groupTabsByWindow(tabs, titlesMap) { //I think the titles map here is annoying. the tabs should be sufficient (which is why group data should have this stuff. This should take the window object and get the tabs from there)
