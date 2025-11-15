@@ -61,6 +61,8 @@ If you drag a tab outside of all the boxes, it will open that tab in a new windo
 
 ## Saving and loading
 
+**ATTENTION - internal save/load broken for now**
+
 There are two kinds of save states: **internal** and **download**. 
 
 Internal save states are states that are saved in the local chromium storage. You can save and load at will up to 50Mb I believe.
@@ -80,7 +82,9 @@ Doing Download tehn Upload at least once will cache that location (at least unle
 
 # To do
 
-- In line with that very last statement, make downloads and uploads always open from saved-tabs or a preset folder
-- check the issue with brave://extensions not seeming to save
 - add persistences to chosen tabs. I.e. on load it keeps some of your tabs
 - refactor
+- allow movement of windows like tabs
+- add adaptive loading times based on number of tabs to load
+- optimize: I believe there must be a faster way to do all of this. I know loading a bunch of websites at once is slow, but I still feel there must be something that could make it faster so the user doesn't have to wait long for many tabs
+- why does the favicon url flicker on upload?

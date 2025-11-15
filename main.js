@@ -139,8 +139,8 @@ function getCurrentWindow() {
     return new Promise(resolve => chrome.windows.getCurrent(resolve));
 }
 
-function createWindow() {
-    return new Promise(resolve => chrome.windows.create({ state: "maximized", focused: true }, resolve));
+function createWindow(url = "") {
+    return new Promise(resolve => chrome.windows.create({ state: "maximized", focused: true, url: url }, resolve));
 }
 
 function updateWindow(windowId) {
@@ -167,10 +167,12 @@ async function restoreState(firstToClose, restToClose, saved) {
 
     try {
         for (const win of saved) {
+            console.log('sliced tabs:', win.tabs.length)
             const prevWindow = await getCurrentWindow();
-            const newWindow = await createWindow();
+            const newTabs = win.tabs.filter(t => t.title != 'Reflection Board')
+            const newWindow = await createWindow(url = newTabs[0].url);
             await updateWindow(prevWindow.id);
-            await openTabsSequentially(win.tabs, newWindow.id);
+            await openTabsSequentially(newTabs.slice(1,newTabs.length), newWindow.id);
         }
     } catch (error) {
         console.error("Error restoring windows and tabs:", error);
@@ -590,7 +592,6 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         //console.log('item obj:',itemObj)
         group.appendChild(createGridItem(itemObj));
     }
-
     const title = createEditableTitleBox(group);
     title.textContent = titleText;
     title.addEventListener('blur', () => {
@@ -600,8 +601,6 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
             chrome.storage.local.set({ titles }, () => { });
         }
     });
-
-
     return group;
 }
 
