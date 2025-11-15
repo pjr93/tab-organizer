@@ -128,9 +128,9 @@ function sleep(ms) {
 
 async function openTabsSequentially(tabs, windowId) {
     for (const tab of tabs) {
-        if (tab.title !== "Reflection Board") {
+        if (tab.title !== "Reflection Board") { //might want to do check for Reflection Board so Reflection board's tabs go in the current app location
             chrome.tabs.create({ windowId, url: tab.url, active: false });
-            await sleep(500); // wait 1 second before next tab
+            await sleep(500);
         }
     }
 }
@@ -149,10 +149,6 @@ function updateWindow(windowId) {
 
 // Assume openTabsSequentially is async and returns a Promise that resolves when done
 async function restoreState(firstToClose, restToClose, saved) {
-    console.log('firstToClose:', firstToClose);
-
-    const appUrl = chrome.runtime.getURL('app.html');
-
     // Close tabs synchronously without awaiting since tabs.remove accepts callback but can be fire and forget
     for (const tabId of firstToClose) {
         try {
@@ -180,7 +176,6 @@ async function restoreState(firstToClose, restToClose, saved) {
         console.error("Error restoring windows and tabs:", error);
     }
 }
-
 // this needs to be adapted for a per window basis - would there be an advantage in putting the data organization separate? - yes for saving individual windows
 //
 function downloadStateAsFile(groups = groupData) {
@@ -209,20 +204,15 @@ function downloadStateAsFile(groups = groupData) {
 }
 
 //requires restoreState so I need to alter it
-function uploadStateFromFile(file) {
+function uploadStateFromFile(file, append = false) {
     const reader = new FileReader();
-
     reader.onload = async (e) => {
-
         try {
             const saved = JSON.parse(e.target.result);
             const appTitle = 'Reflection Board'
-            console.log('saved:', saved, typeof (saved))
-            console.log('groupData:', groupData)
             var appLocation = {}
             var i = 0
             for (win of saved) {
-
                 var j = 0
                 for (tab of win.tabs) {
                     if (tab.title == appTitle) {
@@ -235,11 +225,9 @@ function uploadStateFromFile(file) {
                 }
                 i++
             }
-
             var currentAppLocation = {}
             var k = 0
             for (group of groupData) {
-
                 var m = 0
                 for (item of group) {
                     if (item.title == appTitle) {
@@ -252,31 +240,23 @@ function uploadStateFromFile(file) {
                 }
                 k++
             }
+            var firstToClose;
+            var restToClose;
 
-            var instructions = {}
-
-            //first deleting tabs around the current app.html
-
-            instructions.firstToClose = null
-            k = currentAppLocation.appPosition[0]
-            m = currentAppLocation.appPosition[1]
-            console.log(' k:', k, 'm:', m)
-            firstToClose = groupData[k].filter(element => element.title != appTitle).map(element => element.id)
-            console.log(firstToClose)
-
-            //close everything else
-
-            restToCloseArr = groupData.filter((element, idx) => idx != k)
-
-
-            console.log('upload restToCloseArr:', restToCloseArr)
-            var restToClose = []
-            for (tabs of restToCloseArr) {
-                console.log(tabs)
-
-                restToClose = restToClose.concat(tabs.map(tab => tab.id))
+            if (!append) {
+                k = currentAppLocation.appPosition[0]
+                m = currentAppLocation.appPosition[1]
+                firstToClose = groupData[k].filter(element => element.title != appTitle).map(element => element.id)
+                restToCloseArr = groupData.filter((element, idx) => idx != k)
+                var restToClose = []
+                for (tabs of restToCloseArr) {
+                    restToClose = restToClose.concat(tabs.map(tab => tab.id))
+                }
+            } else {
+                firstToClose = []
+                restToClose = []
             }
-            console.log('upload restToClose:', restToClose)
+            console.log('to close', firstToClose, restToClose)
             restoreState(firstToClose, restToClose, saved);
         } catch (err) {
             alert('check the console after pressing F12');
@@ -284,7 +264,6 @@ function uploadStateFromFile(file) {
         }
     };
     reader.readAsText(file);
-
 }
 
 function groupTabsByWindow(tabs, titlesMap) { //I think the titles map here is annoying. the tabs should be sufficient (which is why group data should have this stuff. This should take the window object and get the tabs from there)
@@ -597,7 +576,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     saveBtn.className = 'group-save-btn';
     saveBtn.textContent = 'S';
     saveBtn.title = 'Save this window group';
-
+    saveBtn.windowId = windowId
     saveBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const groupDataToSave = groupData[idx];
@@ -879,6 +858,7 @@ function renderBoard() {
             );
         });
     });
+
     parentGrid.appendChild(newWindowBtn);
     highlightActiveTab()
     //console.log("groupData:", groupData)
@@ -899,12 +879,25 @@ document.getElementById('download-btn').addEventListener('click', () => {
 });
 
 const uploadFileInput = document.getElementById('upload-file-input');
+const addFileInput = document.getElementById('add-file-input');
+
 document.getElementById('upload-btn').addEventListener('click', () => {
     uploadFileInput.click();
 });
+
+document.getElementById('add-btn').addEventListener('click', () => {
+    addFileInput.click();
+});
+
 uploadFileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         uploadStateFromFile(e.target.files[0]);
+    }
+});
+
+addFileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        uploadStateFromFile(e.target.files[0], append = true);
     }
 });
 

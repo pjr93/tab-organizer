@@ -36,7 +36,7 @@
             padding: 16px 10px 16px 16px;
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
-            
+
             gap: 8px;
             position: relative;
             transition: box-shadow 0.16s, border-color 0.16s;
@@ -48,7 +48,7 @@
         }
 
         .grid-item {
-            
+
             /* Fill grid cell */
             height: 30px;
             min-height: 30px;
@@ -129,7 +129,7 @@
         .group-delete-btn {
             position: absolute;
             top: 6px;
-            right: 6px;
+            right: -11px;
             width: 22px;
             height: 22px;
             background-color: black;
@@ -161,7 +161,7 @@
         .group-save-btn {
             position: absolute;
             top: 50px;
-            right: 6px;
+            right: -11px;
             width: 22px;
             height: 22px;
             background-color: black;
@@ -206,7 +206,7 @@
         .plus-tab-btn {
             position: absolute;
             top: 28px;
-            right: 6px;
+            right: -11px;
             width: 22px;
             height: 22px;
             border-radius: 8px;
@@ -235,6 +235,37 @@
             opacity: 1;
         }
 
+        .load-file-btn {
+            position: absolute;
+            top: 28px;
+            right: -11px;
+            width: 22px;
+            height: 22px;
+            border-radius: 8px;
+            border: none;
+            background-color: black;
+            border: 2px solid #666;
+            color: #666;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            line-height: 20px;
+            padding: 0;
+            z-index: 10;
+            transition: opacity 0.2s ease;
+        }
+
+        .load-file-btn:hover {
+            background-color: #9c6813;
+        }
+
+        .child-grid:hover>.load-file-btn {
+            display: flex;
+            opacity: 1;
+        }
 
         .new-window-btn {
             background-color: black;
