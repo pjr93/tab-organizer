@@ -1,6 +1,3 @@
-
-
-
 chrome.action.onClicked.addListener(() => {
   const appUrl = chrome.runtime.getURL("app.html");
 
@@ -46,6 +43,42 @@ chrome.tabs.onUpdated.addListener(notifyAppPages);
 chrome.windows.onCreated.addListener(notifyAppPages);
 chrome.windows.onRemoved.addListener(notifyAppPages);
 
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command === 'next_tab') {
+    try {
+      const appUrl = chrome.runtime.getURL("app.html");
+      // Only send update if NOT app.html
+      chrome.tabs.query({ url: appUrl }, (tabs) => {
+        const t = tabs[0]
+        chrome.tabs.sendMessage(t.id, {
+          type: "goto_next_tab"
+        });
+      });
+
+    } catch (e) {
+      console.warn("Failed to handle active tab change to next in history", e);
+    }
+  }
+  if (command === 'prev_tab') {
+    try {
+      const appUrl = chrome.runtime.getURL("app.html");
+      // Only send update if NOT app.html
+
+        chrome.tabs.query({ url: appUrl }, (tabs) => {
+          const t = tabs[0]
+          chrome.tabs.sendMessage(t.id, {
+            type: "goto_prev_tab"
+          });
+
+        });
+      
+    } catch (e) {
+      console.warn("Failed to handle active tab change to prev in history", e);
+    }
+  }
+});
+
+
 async function handleActiveTabChange(activeInfo) {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
@@ -53,7 +86,7 @@ async function handleActiveTabChange(activeInfo) {
     // Only send update if NOT app.html
     if (!tab.url.startsWith(appUrl)) {
       chrome.tabs.query({ url: appUrl }, (tabs) => {
-        for (const t of tabs) {
+        for (const t of tabs) { //this loop seems redundant
           chrome.tabs.sendMessage(t.id, {
             type: "active_tab_changed",
             tabId: tab.id
@@ -68,7 +101,7 @@ async function handleActiveTabChange(activeInfo) {
 
 chrome.tabs.onActivated.addListener(handleActiveTabChange);
 
-let listenerActive = true
+/* let listenerActive = true
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "toggleListener") {
     if (message.active && !listenerActive) {
@@ -100,4 +133,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
   }
   return true; // For async sendResponse if needed
-});
+}); */

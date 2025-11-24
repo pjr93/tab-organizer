@@ -14,9 +14,25 @@
   "background": {
     "service_worker": "background.js"
   },
-  "action":{
+  "action": {
     "default_icon": {
       "16": "icon16.png"
+    }
+  },
+  "commands": {
+    "next_tab": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Right",
+        "mac": "Command+Shift+Right"
+      },
+      "description": "Goes to the next tab in the visited list"
+    },
+    "prev_tab": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Left",
+        "mac": "Command+Shift+Left"
+      },
+      "description": "Goes to the next tab in the visited list"
     }
   },
   "icons": {

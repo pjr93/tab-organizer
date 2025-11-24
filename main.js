@@ -14,6 +14,8 @@ let selectedTabIds = new Set();
 let groupData; //probably should be json object
 let windowData;
 let currentActiveTabId = null;
+let tabHistory = []
+let tabCounter = null
 const appUrlPrefix = chrome.runtime.getURL('');
 
 function sleep(ms) {
@@ -68,10 +70,49 @@ function highlightActiveTab() {
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === "active_tab_changed") {
         currentActiveTabId = message.tabId;
+        //I should store the appUrl globally
+        tabHistory.push(message.tabId)
+        tabCounter = null
         highlightActiveTab();
     }
     if (message.type === "sync_browser_state") {
         syncGroupDataFromBrowser();
+    }
+
+    if (message.type === "goto_next_tab") {
+        var length = tabHistory.length
+        if (tabCounter === null) {
+            tabCounter = length - 1
+        }
+        tabCounter++
+        var nextTab = tabHistory[tabCounter % length]
+        chrome.tabs.get(nextTab, (tab) => {
+            chrome.tabs.update(nextTab, { active: true }, () => {
+                console.log('Counter:', tabCounter)
+                console.log('tab history:', tabHistory[tabCounter % length])
+
+                chrome.windows.update(tab.windowId, { focused: true });
+
+            });
+        })
+    }
+    if (message.type === "goto_prev_tab") {
+        var length = tabHistory.length
+        if (tabCounter === null) {
+            tabCounter = tabHistory.length - 1
+        }
+        tabCounter--
+
+        var prevTab = tabHistory[tabCounter % length]
+        chrome.tabs.get(prevTab, (tab) => {
+            chrome.tabs.update(prevTab, { active: true }, () => {
+                console.log('Counter:', tabCounter)
+                console.log('tab history:', tabHistory[tabCounter % length])
+
+                chrome.windows.update(tab.windowId, { focused: true });
+
+            });
+        })
     }
 });
 
@@ -172,7 +213,7 @@ async function restoreState(firstToClose, restToClose, saved) {
             const newTabs = win.tabs.filter(t => t.title != 'Reflection Board')
             const newWindow = await createWindow(url = newTabs[0].url);
             await updateWindow(prevWindow.id);
-            await openTabsSequentially(newTabs.slice(1,newTabs.length), newWindow.id);
+            await openTabsSequentially(newTabs.slice(1, newTabs.length), newWindow.id);
         }
     } catch (error) {
         console.error("Error restoring windows and tabs:", error);
@@ -709,7 +750,7 @@ function createGridItem(itemObj) {
     item.addEventListener('contextmenu', e => {
         e.preventDefault();
         chrome.tabs.update(itemObj.id, { active: true }, () => {
-            if (itemObj.windowId != null) {
+            if (itemObj.windowId != null) { //wtf is itemObj exactly?
                 chrome.windows.update(itemObj.windowId, { focused: true });
             }
         });
@@ -925,5 +966,7 @@ document.body.addEventListener('click', (e) => {
         }, 1000); // Matches CSS animation duration
     }
 });
+
+
 
 renderBoard();
