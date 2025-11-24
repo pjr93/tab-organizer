@@ -16,6 +16,7 @@ let windowData;
 let currentActiveTabId = null;
 let tabHistory = []
 let tabCounter = null
+let tabHistoryOn = false
 const appUrlPrefix = chrome.runtime.getURL('');
 
 function sleep(ms) {
@@ -71,8 +72,10 @@ chrome.runtime.onMessage.addListener((message) => {
     if (message.type === "active_tab_changed") {
         currentActiveTabId = message.tabId;
         //I should store the appUrl globally
-        tabHistory.push(message.tabId)
-        tabCounter = null
+        if (tabHistoryOn) {
+            tabHistory.push(message.tabId) // this should really not occur while scrolling through tab history
+            tabCounter = null
+        }
         highlightActiveTab();
     }
     if (message.type === "sync_browser_state") {
@@ -80,23 +83,28 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 
     if (message.type === "goto_next_tab") {
+        tabHistoryOn = true
+
         var length = tabHistory.length
         if (tabCounter === null) {
             tabCounter = length - 1
         }
         tabCounter++
         var nextTab = tabHistory[tabCounter % length]
+        console.log(nextTab)
         chrome.tabs.get(nextTab, (tab) => {
             chrome.tabs.update(nextTab, { active: true }, () => {
                 console.log('Counter:', tabCounter)
-                console.log('tab history:', tabHistory[tabCounter % length])
+                console.log('tab history:', tabHistory)
 
                 chrome.windows.update(tab.windowId, { focused: true });
 
             });
         })
+        tabHistoryOn = false
     }
     if (message.type === "goto_prev_tab") {
+        tabHistoryOn = true
         var length = tabHistory.length
         if (tabCounter === null) {
             tabCounter = tabHistory.length - 1
@@ -107,12 +115,13 @@ chrome.runtime.onMessage.addListener((message) => {
         chrome.tabs.get(prevTab, (tab) => {
             chrome.tabs.update(prevTab, { active: true }, () => {
                 console.log('Counter:', tabCounter)
-                console.log('tab history:', tabHistory[tabCounter % length])
+                console.log('tab history:', tabHistory)
 
                 chrome.windows.update(tab.windowId, { focused: true });
 
             });
         })
+        tabHistoryOn = false
     }
 });
 
