@@ -20,6 +20,13 @@
     }
   },
   "commands": {
+    "home": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Home",
+        "mac": "Command+Shift+Home"
+      },
+      "description": "Goes to the next tab in the visited list"
+    },
     "next_tab": {
       "suggested_key": {
         "default": "Ctrl+Shift+Right",

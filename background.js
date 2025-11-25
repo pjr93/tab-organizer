@@ -64,17 +64,38 @@ chrome.commands.onCommand.addListener(async (command) => {
       const appUrl = chrome.runtime.getURL("app.html");
       // Only send update if NOT app.html
 
-        chrome.tabs.query({ url: appUrl }, (tabs) => {
-          const t = tabs[0]
-          chrome.tabs.sendMessage(t.id, {
-            type: "goto_prev_tab"
-          });
-
+      chrome.tabs.query({ url: appUrl }, (tabs) => {
+        const t = tabs[0]
+        chrome.tabs.sendMessage(t.id, {
+          type: "goto_prev_tab"
         });
-      
+
+      });
+
     } catch (e) {
       console.warn("Failed to handle active tab change to prev in history", e);
     }
+  }
+  if (command === 'home') {
+    const appUrl = chrome.runtime.getURL("app.html");
+
+    // Query all tabs with the app.html URL
+    chrome.tabs.query({ url: appUrl }, (tabs) => {
+      if (tabs.length > 0) {
+        // If app.html tab exists, focus that tab and bring its window to front
+        const tab = tabs[0];
+        chrome.tabs.update(tab.id, { active: true }, () => {
+          chrome.windows.update(tab.windowId, { focused: true });
+        });
+      } else {
+        // No existing app.html tab, create a new one
+        chrome.windows.getAll({ populate: true }, (windows) => {
+          chrome.storage.local.set({ windows }, () => {
+            chrome.tabs.create({ url: appUrl });
+          });
+        });
+      }
+    });
   }
 });
 
