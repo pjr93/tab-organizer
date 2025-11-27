@@ -43,6 +43,10 @@ Simply hover over and right click on a tab to instantly be brought to it! The ma
 
 You can always navigate back to it by click on the icon on the toolbar at the top.
 
+Ctrl+Shift+Left/Right: as long as the reflection board app window is open, it will track the history of active tabs. You can use these to go back and forth through the list (probably will update it so it doesn't require the app page to be open)
+
+Ctrl+Shift+Home: Usually it is easier to just right click the green square icon, but if for whatever reason it is convenient it is there.
+
 ## Creating tabs and windows
 
 You can create a new tab by hovering the mouse and clicking the "+" button at the bottom right corner. You can close a tab by hovering over the tab until the "x" button appears and then you can click it.
