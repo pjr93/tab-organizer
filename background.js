@@ -8,6 +8,8 @@ chrome.action.onClicked.addListener(() => {
       const tab = tabs[0];
       chrome.tabs.update(tab.id, { active: true }, () => {
         chrome.windows.update(tab.windowId, { focused: true });
+         /* chrome.tabs.sendMessage(tab.id, { type: 'save-scroll-and-reload' }); */
+         chrome.tabs.reload(tab.id, { bypassCache: true });
       });
     } else {
       // No existing app.html tab, create a new one

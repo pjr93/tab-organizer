@@ -29,15 +29,6 @@ function showTabPreview(tab, anchorEl) {
     if (!preview) {
         preview = document.createElement('div');
         preview.id = 'tab-hover-preview';
-        preview.style.position = 'fixed';
-        preview.style.zIndex = 9999;
-        preview.style.background = '#23272e';
-        preview.style.color = 'white';
-        preview.style.padding = '8px 14px';
-        preview.style.borderRadius = '6px';
-        preview.style.boxShadow = '0 2px 12px #0007';
-        preview.style.fontSize = '13px';
-        preview.style.opacity = '0.75';
         document.body.appendChild(preview);
     }
     preview.innerHTML = `
@@ -63,9 +54,7 @@ function highlightActiveTab() {
     allItems.forEach(item => {
         if (Number(item.dataset.id) === currentActiveTabId) {
             item.classList.add('active-tab-glow');
-        } else {
-            item.classList.remove('active-tab-glow');
-        }
+        } else { item.classList.remove('active-tab-glow'); }
     });
 }
 // message events - highlightActiveTab - syncGroupDataFromBrowser
@@ -73,21 +62,18 @@ chrome.runtime.onMessage.addListener((message) => {
     if (message.type === "active_tab_changed") {
         currentActiveTabId = message.tabId;
         //I should store the appUrl globally
-        console.log('tabHistoryOn:',tabHistoryOn)
+        console.log('tabHistoryOn:', tabHistoryOn)
         if (tabHistoryOn) {
-            tabHistory.push(message.tabId) // this should really not occur while scrolling through tab history
+            if (tabCounter !== null && tabCounter !== 0) // there seems to be an issue adding the first element multiple times
+                tabHistory.push(message.tabId) // this should really not occur while scrolling through tab history
             tabCounter = null
         }
         tabHistoryOn = true
         highlightActiveTab();
     }
-    if (message.type === "sync_browser_state") {
-        syncGroupDataFromBrowser();
-    }
-
+    if (message.type === "sync_browser_state") { syncGroupDataFromBrowser(); }
     if (message.type === "goto_next_tab") {
         tabHistoryOn = false
-
         var length = tabHistory.length
         if (tabCounter === null) {
             tabCounter = length - 1
@@ -101,30 +87,26 @@ chrome.runtime.onMessage.addListener((message) => {
                 console.log('tab history:', tabHistory)
                 if (tabHistoryActive) {
                     chrome.windows.update(tab.windowId, { focused: true });
-                } 
+                }
             });
         })
-        
+
     }
     if (message.type === "goto_prev_tab") {
         tabHistoryOn = false
         var length = tabHistory.length
         if (tabCounter === null) {
             tabCounter = tabHistory.length - 1
-        }
-        tabCounter--
+        } tabCounter--
 
         var prevTab = tabHistory[tabCounter % length]
         chrome.tabs.get(prevTab, (tab) => {
             chrome.tabs.update(prevTab, { active: true }, () => {
                 console.log('Counter:', tabCounter)
                 console.log('tab history:', tabHistory)
-                if (tabHistoryActive) {
-                    chrome.windows.update(tab.windowId, { focused: true });
-                }
+                if (tabHistoryActive) { chrome.windows.update(tab.windowId, { focused: true }); }
             });
         })
-
     }
 });
 
@@ -168,9 +150,7 @@ function createTab(options) {
         chrome.tabs.create(options, (tab) => {
             if (chrome.runtime.lastError || !tab) {
                 reject(chrome.runtime.lastError || new Error("Failed to create tab"));
-            } else {
-                resolve(tab);
-            }
+            } else { resolve(tab); }
         });
     });
 }
@@ -188,17 +168,11 @@ async function openTabsSequentially(tabs, windowId) {
     }
 }
 
-function getCurrentWindow() {
-    return new Promise(resolve => chrome.windows.getCurrent(resolve));
-}
+function getCurrentWindow() { return new Promise(resolve => chrome.windows.getCurrent(resolve)); }
 
-function createWindow(url = "") {
-    return new Promise(resolve => chrome.windows.create({ state: "maximized", focused: true, url: url }, resolve));
-}
+function createWindow(url = "") { return new Promise(resolve => chrome.windows.create({ state: "maximized", focused: true, url: url }, resolve)); }
 
-function updateWindow(windowId) {
-    return new Promise(resolve => chrome.windows.update(windowId, { focused: true }, resolve));
-}
+function updateWindow(windowId) { return new Promise(resolve => chrome.windows.update(windowId, { focused: true }, resolve)); }
 
 // Assume openTabsSequentially is async and returns a Promise that resolves when done
 async function restoreState(firstToClose, restToClose, saved) {
@@ -206,16 +180,12 @@ async function restoreState(firstToClose, restToClose, saved) {
     for (const tabId of firstToClose) {
         try {
             chrome.tabs.remove(tabId);
-        } catch (e) {
-            console.warn(`Failed to close tab ${tabId}:`, e);
-        }
+        } catch (e) { console.warn(`Failed to close tab ${tabId}:`, e); }
     }
     for (const tabId of restToClose) {
         try {
             chrome.tabs.remove(tabId);
-        } catch (e) {
-            console.warn(`Failed to close tab ${tabId}:`, e);
-        }
+        } catch (e) { console.warn(`Failed to close tab ${tabId}:`, e); }
     }
 
     try {
@@ -227,9 +197,7 @@ async function restoreState(firstToClose, restToClose, saved) {
             await updateWindow(prevWindow.id);
             await openTabsSequentially(newTabs.slice(1, newTabs.length), newWindow.id);
         }
-    } catch (error) {
-        console.error("Error restoring windows and tabs:", error);
-    }
+    } catch (error) { console.error("Error restoring windows and tabs:", error); }
 }
 // this needs to be adapted for a per window basis - would there be an advantage in putting the data organization separate? - yes for saving individual windows
 //
@@ -275,10 +243,8 @@ function uploadStateFromFile(file, append = false) {
                         appLocation.tabId = tab.id
                         appLocation.url = tab.url
                         appLocation.appPosition = [i, j]
-                    }
-                    j++
-                }
-                i++
+                    } j++
+                } i++
             }
             var currentAppLocation = {}
             var k = 0
@@ -290,10 +256,8 @@ function uploadStateFromFile(file, append = false) {
                         currentAppLocation.tabId = item.id
                         currentAppLocation.url = item.url
                         currentAppLocation.appPosition = [k, m]
-                    }
-                    m++
-                }
-                k++
+                    } m++
+                } k++
             }
             var firstToClose;
             var restToClose;
@@ -304,13 +268,8 @@ function uploadStateFromFile(file, append = false) {
                 firstToClose = groupData[k].filter(element => element.title != appTitle).map(element => element.id)
                 restToCloseArr = groupData.filter((element, idx) => idx != k)
                 var restToClose = []
-                for (tabs of restToCloseArr) {
-                    restToClose = restToClose.concat(tabs.map(tab => tab.id))
-                }
-            } else {
-                firstToClose = []
-                restToClose = []
-            }
+                for (tabs of restToCloseArr) { restToClose = restToClose.concat(tabs.map(tab => tab.id)) }
+            } else { firstToClose = []; restToClose = [] }
             console.log('to close', firstToClose, restToClose)
             restoreState(firstToClose, restToClose, saved);
         } catch (err) {
@@ -341,7 +300,7 @@ function groupTabsByWindow(tabs, titlesMap) { //I think the titles map here is a
     }
     return Object.entries(groups).map(([windowId, tabs]) => ({
         windowId: Number(windowId),
-        title: titlesMap[windowId] || '-',
+        title: titlesMap[windowId] || '_',
         tabs,
     }));
 }
@@ -364,7 +323,7 @@ function saveStateInternal() {
         function serializeWindow(win) {
             return {
                 windowId: win.id,
-                title: titles[win.id] || '-',
+                title: titles[win.id] || '_',
                 tabs: (win.tabs || [])
                     .filter(tab => tab.url && !tab.url.startsWith('chrome://'))
                     .map(tab => ({
@@ -398,11 +357,11 @@ function loadStateInternal() {
 }
 
 
-function createEditableTitleBox(parentElement) {
-    const title = document.createElement('div');
+function createEditableTitleBox(parentElement, windowId) {
+    const title = document.createElement('input');
     title.className = 'editable-title';
-    title.contentEditable = 'true';
-    title.textContent = '-';
+    title.id = windowId
+    title.textContent = '';
     parentElement.appendChild(title);
     return title;
 }
@@ -538,7 +497,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
 
     const plusTabBtn = document.createElement('button');
     plusTabBtn.className = 'plus-tab-btn';
-    plusTabBtn.textContent = '+';
+    plusTabBtn.textContent = '＋';
     plusTabBtn.title = "Add new tab";
     plusTabBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -629,7 +588,8 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     // Save group button
     const saveBtn = document.createElement('button');
     saveBtn.className = 'group-save-btn';
-    saveBtn.textContent = 'S';
+    saveBtn.textContent = '';
+    saveBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v9.17l2.59-2.58L17 11l-5 5-5-5 1.41-1.41L11 12.17V3zm-6 15h14v3H5v-3z" />'
     saveBtn.title = 'Save this window group';
     saveBtn.windowId = windowId
     saveBtn.addEventListener('click', (e) => {
@@ -645,10 +605,10 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         //console.log('item obj:',itemObj)
         group.appendChild(createGridItem(itemObj));
     }
-    const title = createEditableTitleBox(group);
+    const title = createEditableTitleBox(group, windowId);
     title.textContent = titleText;
-    title.addEventListener('blur', () => {
-        const text = title.textContent.trim() || 'Untitled';
+    title.addEventListener('change', () => {
+        const text = title.value || 'Untitled';
         if (windowId) {
             titles[windowId] = text;
             chrome.storage.local.set({ titles }, () => { });
@@ -670,7 +630,7 @@ function createGridItem(itemObj) {
     faviconImg.alt = 'favicon';
     faviconImg.style.width = '16px';
     faviconImg.style.height = '16px';
-    faviconImg.style.marginRight = '6px';
+    faviconImg.style.marginRight = '0px';
     faviconImg.style.verticalAlign = 'middle';
     faviconImg.style.borderRadius = '3px'; // optional styling
 
@@ -767,12 +727,8 @@ function createGridItem(itemObj) {
             }
         });
     });
-    item.addEventListener('mouseenter', e => {
-        showTabPreview(itemObj, item);
-    });
-    item.addEventListener('mouseleave', e => {
-        hideTabPreview();
-    });
+    item.addEventListener('mouseenter', e => { showTabPreview(itemObj, item); });
+    item.addEventListener('mouseleave', e => { hideTabPreview(); });
 
     const btn = document.createElement('button');
     btn.className = 'delete-btn';
@@ -916,7 +872,7 @@ function renderBoard() {
     //console.log("groupData:", groupData)
 }
 
-document.getElementById('internal-save-btn').addEventListener('click', () => {
+/* document.getElementById('internal-save-btn').addEventListener('click', () => {
     //saveStateInternal();
     console.log('not today criminal!')
 });
@@ -924,7 +880,7 @@ document.getElementById('internal-save-btn').addEventListener('click', () => {
 document.getElementById('internal-load-btn').addEventListener('click', () => {
     //loadStateInternal();
     console.log('not today criminal!')
-});
+}); */
 
 document.getElementById('download-btn').addEventListener('click', () => {
     downloadStateAsFile();
@@ -984,5 +940,50 @@ checkbox.addEventListener('change', (e) => {
     tabHistoryActive = e.target.checked
     console.log('tabHistoryActive:', tabHistoryActive)
 })
+
+// app.js or content script
+
+/* // Listen for refresh command FIRST (before any load events)
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'save-scroll-and-reload') {
+    const scrollY = window.scrollY;
+    
+    // Double-save with delay to ensure persistence
+    chrome.storage.local.set({ scrollY }, () => {
+      setTimeout(() => {
+        chrome.storage.local.set({ scrollY });  // Redundant save
+        setTimeout(() => location.reload(true), 50);  // Final delay
+      }, 50);
+    });
+  }
+});
+
+// Restore with aggressive timing
+function restoreScroll() {
+  chrome.storage.local.get(['scrollY'], ({ scrollY }) => {
+    if (scrollY != null && scrollY > 0) {
+      // Multiple restore attempts
+      const attempts = [0, 100, 500, 1000];
+      attempts.forEach(delay => {
+        setTimeout(() => {
+          window.scrollTo(0, scrollY);
+          document.documentElement.scrollTop = scrollY;  // Fallback
+          document.body.scrollTop = scrollY;              // Extra fallback
+        }, delay);
+      });
+      chrome.storage.local.remove('scrollY');
+    }
+  });
+}
+
+// Bind to multiple load events
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', restoreScroll);
+  window.addEventListener('load', restoreScroll);
+} else {
+  restoreScroll();
+}
+window.addEventListener('load', restoreScroll);  */
+
 
 renderBoard();

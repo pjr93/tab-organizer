@@ -87,8 +87,9 @@ Doing Download tehn Upload at least once will cache that location (at least unle
 # To do
 
 - add persistences to chosen tabs. I.e. on load it keeps some of your tabs
-- refactor
 - allow movement of windows like tabs
 - add adaptive loading times based on number of tabs to load
 - optimize: I believe there must be a faster way to do all of this. I know loading a bunch of websites at once is slow, but I still feel there must be something that could make it faster so the user doesn't have to wait long for many tabs
 - why does the favicon url flicker on upload?
+- make return to app loading seamless (right now it loads then scrolls to the previous location so you don't have to keep scrolling down if you were at a different position)
+- group tabs by parent host url. It should be a hotkey and button and then on right click it expands so that you can right click again to navigate
