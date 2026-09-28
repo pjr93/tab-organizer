@@ -1,3 +1,5 @@
+//I should probably rewrite this to use worker scripts
+
 const parentGrid = document.getElementById('parent-grid');
 const dropIndicator = document.getElementById('drop-indicator');
 const outsideOverlay = document.getElementById('outside-overlay');
@@ -205,7 +207,7 @@ function downloadStateAsFile(groups = groupData) {
     const saved = groups.map(group => {
         if (!group.length) return null;
         const windowId = group[0].windowId;
-        const title = titles[windowId] || '-';
+        const title = titles[windowId] || '';
         const tabs = group.map(tab => ({
             id: tab.id,
             title: tab.title,
@@ -361,8 +363,14 @@ function createEditableTitleBox(parentElement, windowId) {
     const title = document.createElement('input');
     title.className = 'editable-title';
     title.id = windowId
-    title.textContent = '';
+    title.value= titles[windowId] || "";
     parentElement.appendChild(title);
+    
+    title.addEventListener('change', () =>{
+        titles[windowId] = title.value
+        console.log(titles[windowId], title.value)
+        chrome.storage.local.set({ titles }, () => { });
+    })
     return title;
 }
 
@@ -605,15 +613,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         //console.log('item obj:',itemObj)
         group.appendChild(createGridItem(itemObj));
     }
-    const title = createEditableTitleBox(group, windowId);
-    title.textContent = titleText;
-    title.addEventListener('change', () => {
-        const text = title.value || 'Untitled';
-        if (windowId) {
-            titles[windowId] = text;
-            chrome.storage.local.set({ titles }, () => { });
-        }
-    });
+    createEditableTitleBox(group, windowId);
     return group;
 }
 
