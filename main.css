@@ -508,3 +508,48 @@
             display: block;
             pointer-events: all;
         }
+        /* Load (Internal) dialog */
+        #load-dialog {
+            background: #1E1E1E;
+            color: white;
+            border: 2px solid #666;
+            border-radius: 8px;
+            padding: 16px 20px;
+            min-width: 360px;
+            max-width: 90vw;
+        }
+
+        #load-dialog::backdrop {
+            background: #000a;
+        }
+
+        #load-dialog h3 {
+            margin: 0 0 4px 0;
+        }
+
+        .load-dialog-warning {
+            color: #f0b46e;
+            margin: 0 0 12px 0;
+            font-size: 14px;
+        }
+
+        .load-slot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 8px 0;
+            border-top: 1px solid #333;
+        }
+
+        .load-slot-meta {
+            color: #aaa;
+            font-size: 13px;
+            margin-top: 2px;
+        }
+
+        .load-dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 12px;
+        }

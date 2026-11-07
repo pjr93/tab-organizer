@@ -20,6 +20,8 @@
 <div class="checkbox-container">
     <input type="checkbox" id="active-tab-history" name="active-tab-history-state" class="checkbox">
     <label for="active-tab-history">view history in app</label>
+    <input type="checkbox" id="autosave" name="autosave-state" class="checkbox">
+    <label for="autosave" title="Saves your session about 10 seconds after tabs change. Restore it with Load (Internal).">autosave</label>
 </div>
     <h2>Reflection Board</h2>
 
@@ -28,9 +30,17 @@
     <div id="outside-overlay"></div>
     <div id="drop-indicator">Drop here to create a new group</div>
 
-    <script src="main.js">
+    <dialog id="load-dialog">
+        <h3>Load internal save</h3>
+        <p class="load-dialog-warning">Loading replaces all open tabs (except this board).</p>
+        <div id="load-dialog-list"></div>
+        <div class="load-dialog-actions">
+            <button id="load-dialog-cancel" class="state-btn">Cancel</button>
+        </div>
+    </dialog>
 
-    </script>
+    <script src="shared.js"></script>
+    <script src="main.js"></script>
 </body>
 
 </html>

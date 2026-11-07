@@ -16,19 +16,7 @@ let selectedTabIds = new Set();
 let groupData; //probably should be json object
 let windowData;
 let currentActiveTabId = null;
-const appUrlPrefix = chrome.runtime.getURL('');
-const APP_URL = chrome.runtime.getURL('app.html');
-const APP_TITLE = 'Reflection Board';
-
-// Identify the board tab by URL rather than title, so a web page titled
-// "Reflection Board" is never mistaken for it. Saved files may come from an
-// install with a different extension id, so for those we also accept any
-// extension's app.html carrying the board's title.
-function isBoardTab(tab) {
-    if (!tab || !tab.url) return false;
-    if (tab.url.startsWith(APP_URL)) return true;
-    return tab.url.startsWith('chrome-extension://') && tab.url.includes('/app.html') && tab.title === APP_TITLE;
-}
+// APP_URL, isBoardTab, serializeTabGroups etc. come from shared.js.
 
 // Built with DOM nodes / textContent (not innerHTML) so page titles and URLs
 // can never inject markup into the extension page.
@@ -92,26 +80,11 @@ chrome.runtime.onMessage.addListener((message) => {
 /* ------------------------------------------------------------------ */
 /* Saving and restoring layouts                                        */
 /* ------------------------------------------------------------------ */
-// Saved format (same for JSON files and internal saves):
-//   [{ windowId, title, tabs: [{ id, title, url, windowId, groupId }] }, ...]
+// Saved format: see serializeTabGroups in shared.js.
 
 // Convert board groups into the saved format.
 function serializeGroups(groups = groupData) {
-    return groups.map(group => {
-        if (!group || !group.length) return null;
-        const windowId = group[0].windowId;
-        return {
-            windowId,
-            title: titles[windowId] || '',
-            tabs: group.map(tab => ({
-                id: tab.id,
-                title: tab.title,
-                url: tab.url,
-                windowId: tab.windowId,
-                groupId: tab.groupId || null,
-            })),
-        };
-    }).filter(Boolean);
+    return serializeTabGroups(groups, titles);
 }
 
 // Throws a readable error if `saved` isn't a layout we can restore.
@@ -188,6 +161,9 @@ async function restoreState(saved, { replace = false } = {}) {
     }
     const windows = prepareSavedLayout(saved);
     restoreInProgress = true;
+    // Tell the background autosave to hold off so it doesn't capture a
+    // half-restored session (expires on its own in case this page dies).
+    await chrome.storage.session.set({ restoreBusyUntil: Date.now() + 10 * 60 * 1000 });
     const failed = [];
     try {
         const boardWindow = await chrome.windows.getCurrent();
@@ -222,6 +198,7 @@ async function restoreState(saved, { replace = false } = {}) {
         }
     } finally {
         restoreInProgress = false;
+        chrome.storage.session.remove('restoreBusyUntil');
         syncGroupDataFromBrowser();
     }
 
@@ -268,20 +245,59 @@ function saveStateInternal() {
     });
 }
 
+// The internal save slots, in the order shown in the Load dialog.
+const INTERNAL_SLOTS = [
+    { label: 'Manual save (Ctrl+S)', dataKey: 'savedState', timeKey: 'savedAt' },
+    { label: 'Autosave', dataKey: 'autoSave', timeKey: 'autoSavedAt' },
+    { label: 'Autosave from previous browser session', dataKey: 'autoSavePrev', timeKey: 'autoSavePrevAt' },
+];
+
+// "Load (Internal)": show every available slot and let the user pick one.
+// Choosing a slot replaces the open tabs, so the dialog doubles as confirmation.
 function loadStateInternal() {
-    chrome.storage.local.get(['savedState', 'savedAt'], async (result) => {
-        if (!result || !result.savedState) {
-            alert("No internal save found. Press Ctrl+S or 'Save (Internal)' first.");
+    const keys = INTERNAL_SLOTS.flatMap(s => [s.dataKey, s.timeKey]);
+    chrome.storage.local.get(keys, (result) => {
+        const dialog = document.getElementById('load-dialog');
+        const list = document.getElementById('load-dialog-list');
+        list.replaceChildren();
+
+        const available = INTERNAL_SLOTS.filter(s => Array.isArray(result[s.dataKey]) && result[s.dataKey].length);
+        if (!available.length) {
+            alert("No internal saves yet. Press Ctrl+S / 'Save (Internal)', or turn on autosave.");
             return;
         }
-        const when = result.savedAt ? new Date(result.savedAt).toLocaleString() : 'an unknown time';
-        if (!confirm(`Replace all open tabs with the internal save from ${when}?`)) return;
-        try {
-            await restoreState(result.savedState, { replace: true });
-        } catch (err) {
-            console.error(err);
-            alert(`Could not load the internal save: ${err.message}`);
+        for (const slot of available) {
+            const data = result[slot.dataKey];
+            const tabCount = data.reduce((n, w) => n + (w.tabs || []).filter(t => !isBoardTab(t)).length, 0);
+            const when = result[slot.timeKey] ? new Date(result[slot.timeKey]).toLocaleString() : 'unknown time';
+
+            const row = document.createElement('div');
+            row.className = 'load-slot';
+            const info = document.createElement('div');
+            const name = document.createElement('b');
+            name.textContent = slot.label;
+            const meta = document.createElement('div');
+            meta.className = 'load-slot-meta';
+            meta.textContent = `${when} · ${data.length} window(s), ${tabCount} tab(s)`;
+            info.append(name, meta);
+
+            const btn = document.createElement('button');
+            btn.className = 'state-btn';
+            btn.textContent = 'Load';
+            btn.title = 'Replace all open tabs with this save';
+            btn.addEventListener('click', async () => {
+                dialog.close();
+                try {
+                    await restoreState(data, { replace: true });
+                } catch (err) {
+                    console.error(err);
+                    alert(`Could not load "${slot.label}": ${err.message}`);
+                }
+            });
+            row.append(info, btn);
+            list.appendChild(row);
         }
+        dialog.showModal();
     });
 }
 
@@ -884,6 +900,20 @@ chrome.storage.local.get(['historyStayInApp'], (result) => {
 checkbox.addEventListener('change', (e) => {
     chrome.storage.local.set({ historyStayInApp: e.target.checked });
 })
+
+// "autosave": background.js saves the session ~10s after tabs change.
+const autosaveCheckbox = document.getElementById('autosave');
+chrome.storage.local.get(['autosaveEnabled'], (result) => {
+    autosaveCheckbox.checked = !!(result && result.autosaveEnabled);
+});
+autosaveCheckbox.addEventListener('change', async (e) => {
+    await chrome.storage.local.set({ autosaveEnabled: e.target.checked });
+    if (e.target.checked) chrome.runtime.sendMessage({ type: 'autosave_now' }).catch(() => { });
+});
+
+document.getElementById('load-dialog-cancel').addEventListener('click', () => {
+    document.getElementById('load-dialog').close();
+});
 
 // app.js or content script
 

@@ -1,4 +1,4 @@
-const APP_URL = chrome.runtime.getURL("app.html");
+importScripts("shared.js"); // APP_URL, isBoardTab, isOwnPage, serializeTabGroups
 
 function isBoardUrl(url) {
   return typeof url === "string" && url.startsWith(APP_URL);
@@ -55,16 +55,72 @@ function scheduleBoardSync() {
 // Only these onUpdated changes affect what the board displays.
 const RELEVANT_UPDATE_KEYS = ["title", "url", "favIconUrl", "pinned", "groupId", "discarded", "audible", "mutedInfo"];
 
-chrome.tabs.onCreated.addListener(scheduleBoardSync);
-chrome.tabs.onRemoved.addListener(scheduleBoardSync);
-chrome.tabs.onMoved.addListener(scheduleBoardSync);
-chrome.tabs.onAttached.addListener(scheduleBoardSync);
-chrome.tabs.onDetached.addListener(scheduleBoardSync);
+function onBrowserChanged() {
+  scheduleBoardSync();
+  scheduleAutosave();
+}
+
+chrome.tabs.onCreated.addListener(onBrowserChanged);
+chrome.tabs.onRemoved.addListener(onBrowserChanged);
+chrome.tabs.onMoved.addListener(onBrowserChanged);
+chrome.tabs.onAttached.addListener(onBrowserChanged);
+chrome.tabs.onDetached.addListener(onBrowserChanged);
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-  if (RELEVANT_UPDATE_KEYS.some(key => key in changeInfo)) scheduleBoardSync();
+  if (RELEVANT_UPDATE_KEYS.some(key => key in changeInfo)) onBrowserChanged();
 });
-chrome.windows.onCreated.addListener(scheduleBoardSync);
-chrome.windows.onRemoved.addListener(scheduleBoardSync);
+chrome.windows.onCreated.addListener(onBrowserChanged);
+chrome.windows.onRemoved.addListener(onBrowserChanged);
+
+/* ------------------------------------------------------------------ */
+/* Autosave                                                            */
+/* ------------------------------------------------------------------ */
+// When enabled (board checkbox), the session is saved to its own slot
+// ("autoSave") about 10s after the last tab/window change. It never touches
+// the manual Ctrl+S save. On browser startup the previous session's autosave
+// is moved to "autoSavePrev" so a fresh, empty session can't overwrite it.
+
+const AUTOSAVE_DELAY_MS = 10000;
+let autosaveTimer = null;
+
+function scheduleAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(runAutosave, AUTOSAVE_DELAY_MS);
+}
+
+async function runAutosave() {
+  autosaveTimer = null;
+  const { autosaveEnabled, titles = {} } = await chrome.storage.local.get(["autosaveEnabled", "titles"]);
+  if (!autosaveEnabled) return;
+
+  // The board sets this while restoring, so we don't save a half-built session.
+  const { restoreBusyUntil } = await chrome.storage.session.get("restoreBusyUntil");
+  if (restoreBusyUntil && Date.now() < restoreBusyUntil) {
+    scheduleAutosave();
+    return;
+  }
+
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+  const saved = serializeTabGroups(windows.map(w => w.tabs || []), titles);
+  if (!saved.some(w => w.tabs.some(t => !isBoardTab(t)))) return; // nothing worth saving
+  await chrome.storage.local.set({ autoSave: saved, autoSavedAt: Date.now() });
+}
+
+chrome.runtime.onStartup.addListener(async () => {
+  const { autoSave, autoSavedAt } = await chrome.storage.local.get(["autoSave", "autoSavedAt"]);
+  if (autoSave) {
+    await chrome.storage.local.set({ autoSavePrev: autoSave, autoSavePrevAt: autoSavedAt });
+    await chrome.storage.local.remove(["autoSave", "autoSavedAt"]);
+  }
+});
+
+// Window titles are edited on the board; include renames in the next autosave.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.titles) scheduleAutosave();
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message && message.type === "autosave_now") runAutosave();
+});
 
 /* ------------------------------------------------------------------ */
 /* Tab history (most-recently-used order, like Alt+Tab)                */
