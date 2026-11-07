@@ -39,25 +39,29 @@ Each main box is a window. Each sub item is a tab.
 
 ## Navigation
 
-Simply hover over and right click on a tab to instantly be brought to it! The main app window will always bee in green and it is called "Reflection Board"
+Simply hover over and right click on a tab to instantly be brought to it! The board's own tab always shows in green, and the page is called "Reflection Board".
 
-You can always navigate back to it by click on the icon on the toolbar at the top.
+You can always navigate back to it by clicking the icon on the toolbar at the top, or with `Alt+Shift+Home`.
 
-Ctrl+Shift+Left/Right: as long as the reflection board app window is open, it will track the history of active tabs. You can use these to go back and forth through the list (probably will update it so it doesn't require the app page to be open)
+`Alt+Shift+Left` / `Alt+Shift+Right`: step through your recently used tabs, like Alt+Tab. Left goes to older tabs, Right comes back toward newer ones. About a second after your last press (or as soon as you switch tabs some other way) the tab you landed on moves to the front of the list. This works whether or not the board is open.
 
-Ctrl+Shift+Home: Usually it is easier to just right click the green square icon, but if for whatever reason it is convenient it is there.
+"view history in app" checkbox: when checked, the history hotkeys switch tabs inside their windows but keep you on the board, so you can watch the highlight move. When unchecked, they bring the tab's window to the front.
+
+You can change any of these shortcuts at `chrome://extensions/shortcuts` (or your browser's equivalent).
 
 ## Creating tabs and windows
 
 You can create a new tab by hovering the mouse and clicking the "+" button at the bottom right corner. You can close a tab by hovering over the tab until the "x" button appears and then you can click it.
 
-You can also close an entire window by clicking the "x" at the top right corner of the main box. 
+You can also close an entire window by clicking the "x" at the top right corner of the main box.
 
-You can open a new window by clicking the "+" outside of all the other windows
+You can open a new window by clicking the "+" outside of all the other windows.
+
+Click the title box in a window to name it. Names are kept while the window stays open (including when the board is reloaded) and are included in saves.
 
 ## Drag and drop features
 
-You can rearrange tabs within a box and it will also change the order of the tab in the main browser UI
+You can rearrange tabs within a box and it will also change the order of the tab in the main browser UI. Click, Shift+click and Ctrl+click select several tabs to drag together.
 
 You can drag a tab between windows by moving them to a different box
 
@@ -65,31 +69,24 @@ If you drag a tab outside of all the boxes, it will open that tab in a new windo
 
 ## Saving and loading
 
-**ATTENTION - internal save/load broken for now**
+There are two kinds of save states: **internal** and **JSON file**. Both save every window, its tabs and its title.
 
-There are two kinds of save states: **internal** and **download**. 
+- **Save (Internal)** / `Ctrl+S`: keeps one snapshot in the browser's extension storage (each save overwrites the previous one).
+- **Load (Internal)**: asks for confirmation, then replaces your open tabs with that snapshot.
+- **Save JSON**: downloads `tab_layout.json`. I recommend saving it in the app's "saved-tabs" folder. The download icon on each window box saves just that window.
+- **Upload JSON**: replaces your open tabs with the windows in a saved file.
+- **Add JSON**: opens the windows from a saved file alongside the tabs you already have.
 
-Internal save states are states that are saved in the local chromium storage. You can save and load at will up to 50Mb I believe.
+When loading, the saved windows are created first and only then are your old tabs closed, so a bad file won't wipe your session. Restored tabs are created unloaded: they appear immediately but each page only loads when you first open it.
 
-Download save states are states that are saved locally by a .json file. These have to be sent through downloads and uploads, but otherwise will save and restore all of your tabs
+WARNING: some browser-internal pages (e.g. brave://extensions) can't be reopened by extensions. Any tab that can't be restored is skipped and you'll be told how many; the list is in the console (F12).
 
-WARNING: I noticed brave://extensions tab not save properly. This might happen with other tabs. Let me know if you notice them
-
-To save internally, press ```ctrl+s``` or click the ```Save (Internal)``` button. Then to load, just click the ```Load (Internal)``` button.
-
-Download JSON will open a dialog window to save your tabs. I recommend navigating to the app folder and saving it in "saved-tabs"
-
-Upload JSON will open a dialog window as well. Navigate to the folder where you saved your tabs and you can load from there.
-
-Doing Download tehn Upload at least once will cache that location (at least unless you download or upload something else)
+Doing a save then an upload at least once will cache that folder location (at least unless you download or upload something else).
 
 
 # To do
 
 - add persistences to chosen tabs. I.e. on load it keeps some of your tabs
 - allow movement of windows like tabs
-- add adaptive loading times based on number of tabs to load
-- optimize: I believe there must be a faster way to do all of this. I know loading a bunch of websites at once is slow, but I still feel there must be something that could make it faster so the user doesn't have to wait long for many tabs
 - why does the favicon url flicker on upload?
-- make return to app loading seamless (right now it loads then scrolls to the previous location so you don't have to keep scrolling down if you were at a different position)
 - group tabs by parent host url. It should be a hotkey and button and then on right click it expands so that you can right click again to navigate
