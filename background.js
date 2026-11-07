@@ -22,7 +22,7 @@ async function messageBoards(message) {
 /* ------------------------------------------------------------------ */
 
 async function openOrFocusBoard() {
-  await captureCurrentView(); // full preview: remember the tab we're leaving
+  captureCurrentView(); // full preview: remember the tab we're leaving (not awaited)
   const tabs = await getBoardTabs();
   if (tabs.length > 0) {
     const tab = tabs[0];
@@ -204,7 +204,7 @@ function tabToItem(tab) {
 
 async function openSwitcher(step) {
   await ready;
-  await captureCurrentView(); // full preview: remember the tab we're leaving
+  captureCurrentView(); // full preview: remember the tab we're leaving (not awaited)
   const origin = await chrome.windows.getLastFocused({ populate: true });
   const current = origin && origin.tabs ? origin.tabs.find(t => t.active) : null;
 
@@ -419,32 +419,34 @@ async function shrinkScreenshot(dataUrl) {
   return canvas.convertToBlob({ type: "image/jpeg", quality: 0.75 });
 }
 
-// Screenshot the visible tab of `windowId` and store it for `storeAs.tabId`
-// (defaults to that visible tab). Throws if it can't be captured.
-async function captureVisible(windowId, storeAs) {
+// Screenshot the visible tab of `windowId` and store it under that tab's id.
+// With `expectTabId`, only capture if that tab is still the visible one (the
+// capture may run a little later because of the rate limit). Throws if it
+// can't be captured.
+async function captureVisible(windowId, expectTabId) {
   return queueCapture(async () => {
     const [active] = await chrome.tabs.query({ active: true, windowId });
     if (!active) throw new Error("No visible tab");
-    const target = storeAs || { tabId: active.id, url: active.url };
-    if (!storeAs && (!canScreenshot(active.url) || active.status !== "complete")) {
+    if (expectTabId != null && active.id !== expectTabId) throw new Error("Tab no longer visible");
+    if (!canScreenshot(active.url) || active.status !== "complete") {
       throw new Error("Tab can't be captured right now");
     }
     const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 80 });
     const blob = await shrinkScreenshot(dataUrl);
-    await PreviewStore.put(target.tabId, { url: target.url, blob, at: Date.now() });
+    await PreviewStore.put(active.id, { url: active.url, blob, at: Date.now() });
   });
 }
 
-// Best-effort capture of what the user is looking at, before they move away.
-async function captureCurrentView(timeoutMs = 400) {
+// Screenshot what the user is looking at as they move away (switcher, board
+// hotkey). Not awaited by callers: it captures the tab's own contents, so it
+// can run while the switcher window opens on top.
+async function captureCurrentView() {
   if (!(await previewEnabled())) return;
   try {
-    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"], populate: true });
     if (!win || win.state === "minimized") return;
-    await Promise.race([
-      captureVisible(win.id),
-      new Promise(r => setTimeout(r, timeoutMs)),
-    ]);
+    const active = (win.tabs || []).find(t => t.active);
+    if (active) await captureVisible(win.id, active.id);
   } catch (e) { /* nothing visible to capture */ }
 }
 
