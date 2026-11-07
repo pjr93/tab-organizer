@@ -53,7 +53,7 @@ function scheduleBoardSync() {
 }
 
 // Only these onUpdated changes affect what the board displays.
-const RELEVANT_UPDATE_KEYS = ["title", "url", "favIconUrl", "pinned", "groupId", "discarded"];
+const RELEVANT_UPDATE_KEYS = ["title", "url", "favIconUrl", "pinned", "groupId", "discarded", "audible", "mutedInfo"];
 
 chrome.tabs.onCreated.addListener(scheduleBoardSync);
 chrome.tabs.onRemoved.addListener(scheduleBoardSync);

@@ -192,7 +192,7 @@ async function restoreState(saved, { replace = false } = {}) {
     try {
         const boardWindow = await chrome.windows.getCurrent();
         const toClose = replace
-            ? (await chrome.tabs.query({})).filter(t => !isBoardTab(t)).map(t => t.id)
+            ? (await chrome.tabs.query({ windowType: 'normal' })).filter(t => !isBoardTab(t)).map(t => t.id)
             : [];
 
         for (const win of windows) {
@@ -313,8 +313,10 @@ function pruneTitles(windows) {
 }
 
 //Gets tab data from the chrome API - renderBoard
+// Only normal browser windows are shown; popup windows (the tab switcher, the
+// preview capture window, site popups) are left out.
 function syncGroupDataFromBrowser() {
-    chrome.windows.getAll({ populate: true }, (windows) => {
+    chrome.windows.getAll({ populate: true, windowTypes: ['normal'] }, (windows) => {
         if (chrome.runtime.lastError) return;
         pruneTitles(windows);
         groupData = windows.map(win => {
@@ -537,6 +539,25 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     return group;
 }
 
+// Speaker icon for tabs that are playing sound (🔊) or muted (🔇). Clicking it
+// toggles mute without leaving the board. Returns null for silent tabs.
+function createAudioButton(itemObj) {
+    const muted = !!(itemObj.mutedInfo && itemObj.mutedInfo.muted);
+    if (!itemObj.audible && !muted) return null;
+    const btn = document.createElement('button');
+    btn.className = 'audio-btn';
+    btn.type = 'button';
+    btn.textContent = muted ? '🔇' : '🔊';
+    btn.title = muted ? 'Unmute tab' : 'Mute tab';
+    btn.draggable = false;
+    btn.addEventListener('mousedown', e => e.stopPropagation());
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        chrome.tabs.update(itemObj.id, { muted: !muted });
+    });
+    return btn;
+}
+
 //creates the tab UI element - onDragAnywhere - hideDropIndicator - deactivateOutsideOverlay - clearPlaceholder - showTabPreview - hideTabPreview
 function createGridItem(itemObj) {
     // Container
@@ -562,6 +583,8 @@ function createGridItem(itemObj) {
     // Clear existing content and append favicon + text
     item.textContent = '';
     item.appendChild(faviconImg);
+    const audioBtn = createAudioButton(itemObj);
+    if (audioBtn) item.appendChild(audioBtn);
     item.appendChild(textSpan);
     if (itemObj.id === currentActiveTabId) {
         item.classList.add('active-tab-glow');
