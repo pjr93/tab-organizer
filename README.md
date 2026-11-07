@@ -88,10 +88,15 @@ If you drag a tab outside of all the boxes, it will open that tab in a new windo
 
 There are two kinds of save states: **internal** and **JSON file**. Both save every window, its tabs and its title.
 
-- **Save (Internal)** / `Ctrl+S`: keeps one snapshot in the browser's extension storage (each save overwrites the previous one).
-- **autosave** checkbox: saves your session automatically about 10 seconds after tabs or windows change, into its own slot (it never overwrites your Ctrl+S save). When the browser starts, the last autosave is kept as "Autosave from previous browser session", so a fresh empty session can't overwrite it.
-- **Load (Internal)**: opens a list of the available internal saves (manual, autosave, previous session) with their time and size. Choosing one replaces your open tabs with it.
-- **Save JSON**: downloads `tab_layout.json`. I recommend saving it in the app's "saved-tabs" folder. The download icon on each window box saves just that window.
+- **Save (Internal)** / `Ctrl+S`: asks for a name and a folder, then saves the whole session in the browser's extension storage. You can keep as many named saves as you like; saving with a name that already exists in that folder asks before replacing it.
+- **Save window internally** (the disk icon on each window box, under the download icon): saves just that window the same way, as a one-window session.
+- **autosave** checkbox: saves your session automatically about 10 seconds after tabs or windows change, into its own slot (it never touches your named saves). When the browser starts, the last autosave is kept as "Autosave from previous browser session", so a fresh empty session can't overwrite it.
+- **Load (Internal)**: browse your internal saves.
+  - Folders: click a folder to open it, use the path at the top to go back. **New folder** creates one inside the folder you're in (folders can be nested). Deleting a folder asks first and also deletes everything inside it.
+  - Search: the search bar finds saves by name, or by the title/URL of any tab inside them, across all folders.
+  - Each save has **Load** (replaces your open tabs), **Add** (opens it alongside them), **Export JSON** (downloads it as a file you can load later with Upload JSON) and **Delete** (asks first).
+  - Autosaves are in the read-only "Autosaves" folder.
+- **Save JSON**: downloads `tab_layout.json`. I recommend saving it in the app's "saved-tabs" folder. The download icon on each window box downloads just that window.
 - **Upload JSON**: replaces your open tabs with the windows in a saved file.
 - **Add JSON**: opens the windows from a saved file alongside the tabs you already have.
 

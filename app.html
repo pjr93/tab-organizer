@@ -33,17 +33,41 @@
     <div id="outside-overlay"></div>
     <div id="drop-indicator">Drop here to create a new group</div>
 
+    <dialog id="save-dialog">
+        <form id="save-form">
+            <h3 id="save-dialog-title">Save session internally</h3>
+            <p id="save-summary" class="load-slot-meta"></p>
+            <label class="field">Name
+                <input id="save-name" type="text" autocomplete="off" required>
+            </label>
+            <label class="field">Folder
+                <select id="save-folder"></select>
+            </label>
+            <p class="load-slot-meta">Create folders from Load (Internal).</p>
+            <div class="load-dialog-actions">
+                <button type="button" id="save-dialog-cancel" class="state-btn">Cancel</button>
+                <button type="submit" class="state-btn primary-btn">Save</button>
+            </div>
+        </form>
+    </dialog>
+
     <dialog id="load-dialog">
-        <h3>Load internal save</h3>
-        <p class="load-dialog-warning">Loading replaces all open tabs (except this board).</p>
-        <div id="load-dialog-list"></div>
+        <h3>Internal saves</h3>
+        <div class="saves-toolbar">
+            <input id="saves-search" type="search" placeholder="Search saves, tab titles and URLs…" autocomplete="off">
+            <button type="button" id="new-folder-btn" class="state-btn">New folder</button>
+        </div>
+        <div id="saves-path"></div>
+        <p class="load-dialog-warning">Load replaces all open tabs (except this board). Add opens the save alongside them.</p>
+        <div id="saves-list"></div>
         <div class="load-dialog-actions">
-            <button id="load-dialog-cancel" class="state-btn">Cancel</button>
+            <button type="button" id="load-dialog-cancel" class="state-btn">Close</button>
         </div>
     </dialog>
 
     <script src="shared.js"></script>
     <script src="main.js"></script>
+    <script src="saves.js"></script>
     <script src="switcher-overlay.js"></script>
 </body>
 

@@ -281,12 +281,16 @@ async function restoreState(saved, { replace = false } = {}) {
 }
 
 function downloadStateAsFile(groups = groupData) {
-    const jsonStr = JSON.stringify(serializeGroups(groups), null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
+    downloadJson(serializeGroups(groups), 'tab_layout.json');
+}
+
+// Download a saved layout (or any data) as a .json file.
+function downloadJson(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'tab_layout.json';
+    a.download = filename;
     a.click();
     // Give the download a moment to start before releasing the blob.
     setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -307,70 +311,15 @@ function uploadStateFromFile(file, append = false) {
     reader.readAsText(file);
 }
 
-// Internal save: one snapshot kept in chrome.storage.local.
-function saveStateInternal() {
-    const savedState = serializeGroups(groupData || []);
-    chrome.storage.local.set({ savedState, savedAt: Date.now() }, () => {
-        if (chrome.runtime.lastError) {
-            alert(`Internal save failed: ${chrome.runtime.lastError.message}`);
-        }
-    });
+// Internal saves (named, in folders) live in saves.js.
+
+function defaultSessionName() {
+    return 'Session ' + new Date().toLocaleString();
 }
 
-// The internal save slots, in the order shown in the Load dialog.
-const INTERNAL_SLOTS = [
-    { label: 'Manual save (Ctrl+S)', dataKey: 'savedState', timeKey: 'savedAt' },
-    { label: 'Autosave', dataKey: 'autoSave', timeKey: 'autoSavedAt' },
-    { label: 'Autosave from previous browser session', dataKey: 'autoSavePrev', timeKey: 'autoSavePrevAt' },
-];
-
-// "Load (Internal)": show every available slot and let the user pick one.
-// Choosing a slot replaces the open tabs, so the dialog doubles as confirmation.
-function loadStateInternal() {
-    const keys = INTERNAL_SLOTS.flatMap(s => [s.dataKey, s.timeKey]);
-    chrome.storage.local.get(keys, (result) => {
-        const dialog = document.getElementById('load-dialog');
-        const list = document.getElementById('load-dialog-list');
-        list.replaceChildren();
-
-        const available = INTERNAL_SLOTS.filter(s => Array.isArray(result[s.dataKey]) && result[s.dataKey].length);
-        if (!available.length) {
-            alert("No internal saves yet. Press Ctrl+S / 'Save (Internal)', or turn on autosave.");
-            return;
-        }
-        for (const slot of available) {
-            const data = result[slot.dataKey];
-            const tabCount = data.reduce((n, w) => n + (w.tabs || []).filter(t => !isBoardTab(t)).length, 0);
-            const when = result[slot.timeKey] ? new Date(result[slot.timeKey]).toLocaleString() : 'unknown time';
-
-            const row = document.createElement('div');
-            row.className = 'load-slot';
-            const info = document.createElement('div');
-            const name = document.createElement('b');
-            name.textContent = slot.label;
-            const meta = document.createElement('div');
-            meta.className = 'load-slot-meta';
-            meta.textContent = `${when} · ${data.length} window(s), ${tabCount} tab(s)`;
-            info.append(name, meta);
-
-            const btn = document.createElement('button');
-            btn.className = 'state-btn';
-            btn.textContent = 'Load';
-            btn.title = 'Replace all open tabs with this save';
-            btn.addEventListener('click', async () => {
-                dialog.close();
-                try {
-                    await restoreState(data, { replace: true });
-                } catch (err) {
-                    console.error(err);
-                    alert(`Could not load "${slot.label}": ${err.message}`);
-                }
-            });
-            row.append(info, btn);
-            list.appendChild(row);
-        }
-        dialog.showModal();
-    });
+function saveSessionInternal() {
+    if (document.querySelector('dialog[open]')) return;
+    openSaveDialog(serializeGroups(groupData || []), defaultSessionName());
 }
 
 
@@ -683,7 +632,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     saveBtn.className = 'group-save-btn';
     saveBtn.textContent = '';
     saveBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v9.17l2.59-2.58L17 11l-5 5-5-5 1.41-1.41L11 12.17V3zm-6 15h14v3H5v-3z" />'
-    saveBtn.title = 'Save this window group';
+    saveBtn.title = 'Download this window as JSON';
     saveBtn.windowId = windowId
     saveBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -693,6 +642,20 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         }
     });
     group.appendChild(saveBtn);
+
+    // Save this window as an internal save (a one-window session).
+    const saveInternalBtn = document.createElement('button');
+    saveInternalBtn.className = 'group-save-btn group-save-internal-btn';
+    saveInternalBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 2v4h8V5H7zm5 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>';
+    saveInternalBtn.title = 'Save this window internally';
+    saveInternalBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const tabs = groupData[idx];
+        if (!tabs || !tabs.length) return;
+        const name = titles[windowId] || tabs.find(t => !isBoardTab(t))?.title || 'Window';
+        openSaveDialog(serializeGroups([tabs]), name);
+    });
+    group.appendChild(saveInternalBtn);
 
     for (const itemObj of items) {
         //console.log('item obj:',itemObj)
@@ -974,11 +937,11 @@ function renderBoard() {
 }
 
 document.getElementById('internal-save-btn').addEventListener('click', () => {
-    saveStateInternal();
+    saveSessionInternal();
 });
 
 document.getElementById('internal-load-btn').addEventListener('click', () => {
-    loadStateInternal();
+    openLoadDialog();
 });
 
 document.getElementById('download-btn').addEventListener('click', () => {
@@ -1015,7 +978,7 @@ addFileInput.addEventListener('change', (e) => {
 window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        saveStateInternal();
+        saveSessionInternal();
 
         const saveBtn = document.getElementById('internal-save-btn');
         if (saveBtn) {
@@ -1069,9 +1032,7 @@ fullPreviewCheckbox.addEventListener('change', (e) => {
     chrome.storage.local.set({ fullPreview: fullPreviewEnabled });
 });
 
-document.getElementById('load-dialog-cancel').addEventListener('click', () => {
-    document.getElementById('load-dialog').close();
-});
+
 
 // app.js or content script
 
