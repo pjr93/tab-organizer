@@ -803,3 +803,14 @@
         }
 
 
+
+        /* Briefly highlight a window box the board scrolled to */
+        @keyframes focusFlash {
+            0%   { box-shadow: 0 0 0 0 #2196F3; border-color: #2196F3; }
+            30%  { box-shadow: 0 0 0 6px #2196F3aa; border-color: #2196F3; }
+            100% { box-shadow: 0 0 0 0 #2196F300; }
+        }
+
+        .child-grid.focus-flash {
+            animation: focusFlash 1.5s ease-out;
+        }

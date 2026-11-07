@@ -23,6 +23,15 @@ async function messageBoards(message) {
 
 async function openOrFocusBoard() {
   captureCurrentView(); // full preview: remember the tab we're leaving (not awaited)
+
+  // The window the user is coming from: the board scrolls to its box.
+  let focusWindowId = null;
+  try {
+    const from = await chrome.windows.getLastFocused({ populate: true, windowTypes: ["normal"] });
+    const active = from && from.tabs ? from.tabs.find(t => t.active) : null;
+    if (from && !(active && isBoardUrl(active.url))) focusWindowId = from.id;
+  } catch (e) { /* no normal window */ }
+
   const tabs = await getBoardTabs();
   if (tabs.length > 0) {
     const tab = tabs[0];
@@ -30,8 +39,10 @@ async function openOrFocusBoard() {
     await chrome.windows.update(tab.windowId, { focused: true });
     // Refresh the board's data in place rather than reloading the page, so the
     // scroll position and selection are kept.
-    chrome.tabs.sendMessage(tab.id, { type: "sync_browser_state" }).catch(() => { });
+    chrome.tabs.sendMessage(tab.id, { type: "sync_browser_state", focusWindowId }).catch(() => { });
   } else {
+    // A new board picks this up on startup.
+    if (focusWindowId != null) await chrome.storage.session.set({ boardFocusWindow: { id: focusWindowId, at: Date.now() } });
     await chrome.tabs.create({ url: APP_URL });
   }
 }

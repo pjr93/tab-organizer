@@ -143,7 +143,10 @@ chrome.runtime.onMessage.addListener((message) => {
         currentActiveTabId = message.tabId;
         highlightActiveTab();
     }
-    if (message.type === "sync_browser_state") { syncGroupDataFromBrowser(); }
+    if (message.type === "sync_browser_state") {
+        if (message.focusWindowId != null) focusWindowBox(message.focusWindowId);
+        syncGroupDataFromBrowser();
+    }
 });
 
 /* ------------------------------------------------------------------ */
@@ -489,6 +492,10 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     const group = document.createElement('div');
     group.className = 'child-grid';
     group.dataset.group = idx;
+    if (windowId != null) {
+        group.dataset.windowId = windowId;
+        applyFocusFlash(group, windowId);
+    }
 
 
     const plusTabBtn = document.createElement('button');
@@ -868,6 +875,7 @@ outsideOverlay.addEventListener('drop', ev => {
         chrome.windows.create({ state: 'maximized', focused: true }, newWindow => {
             if (!newWindow || !newWindow.id) return;
             const newWindowId = newWindow.id;
+            focusWindowBox(newWindowId); // scroll the board to the new window
             const tabIdsToMove = tabsToMove.map(t => t.id);
 
             chrome.tabs.move(tabIdsToMove, { windowId: newWindowId, index: -1 }, () => {
@@ -901,6 +909,45 @@ outsideOverlay.addEventListener('drop', ev => {
 });
 
 //render the board - syncGroupDataFromBrowser - highlightActiveTab
+// "Zoom to" a window box: scroll the board to it and flash it. Used when
+// opening the board (the window you came from) and after creating a window
+// (new-window button, dragging tabs out). Requests wait for the box to appear
+// (the window may not be on the board until the next sync) and expire after 10s.
+let pendingFocus = null; // { windowId, until }
+let focusFlash = null;   // { windowId, start } so the highlight survives board re-renders
+const FOCUS_FLASH_MS = 1500;
+
+// Give a (re)created box the highlight, continuing the animation where it is.
+function applyFocusFlash(box, windowId) {
+    if (!focusFlash || focusFlash.windowId !== windowId) return;
+    const elapsed = Date.now() - focusFlash.start;
+    if (elapsed >= FOCUS_FLASH_MS) {
+        focusFlash = null;
+        return;
+    }
+    box.style.animationDelay = `-${elapsed}ms`;
+    box.classList.add('focus-flash');
+}
+
+function focusWindowBox(windowId) {
+    pendingFocus = { windowId, until: Date.now() + 10000 };
+    applyPendingFocus();
+}
+
+function applyPendingFocus() {
+    if (!pendingFocus) return;
+    if (Date.now() > pendingFocus.until) {
+        pendingFocus = null;
+        return;
+    }
+    const box = parentGrid.querySelector(`.child-grid[data-window-id="${pendingFocus.windowId}"]`);
+    if (!box) return;
+    pendingFocus = null;
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    focusFlash = { windowId: Number(box.dataset.windowId), start: Date.now() };
+    applyFocusFlash(box, focusFlash.windowId);
+}
+
 // Board layout: "shortest column first" masonry. Window boxes are placed in
 // board order, each into whichever column is currently shortest, so they read
 // left-to-right like a grid but each box is only as tall as its tabs need.
@@ -950,6 +997,7 @@ function renderBoard() {
             chrome.windows.create(
                 { state: "maximized", focused: true },
                 (newWindow) => {
+                    if (newWindow) focusWindowBox(newWindow.id); // scroll the board to it
                     chrome.windows.update(prevWindow.id, { focused: true }, () => {
                         syncGroupDataFromBrowser();
                     });
@@ -960,6 +1008,7 @@ function renderBoard() {
 
     boardItems.push(newWindowBtn);
     layoutBoard();
+    applyPendingFocus();
     highlightActiveTab()
     //console.log("groupData:", groupData)
 }
@@ -1109,6 +1158,13 @@ window.addEventListener('load', restoreScroll);  */
 
 // Startup: load persisted window titles first, then pull the live browser state.
 // (groupData is undefined until the first sync, so we must not render before it.)
+// Opened from the toolbar/hotkey while no board existed: scroll to the window
+// the user came from (left in session storage by background.js).
+chrome.storage.session.get('boardFocusWindow').then(({ boardFocusWindow }) => {
+    if (boardFocusWindow && Date.now() - boardFocusWindow.at < 15000) focusWindowBox(boardFocusWindow.id);
+    chrome.storage.session.remove('boardFocusWindow');
+}).catch(() => { });
+
 chrome.storage.local.get(['titles', 'windowOrder'], (result) => {
     if (result && result.titles) titles = result.titles;
     if (result && Array.isArray(result.windowOrder)) windowOrder = result.windowOrder;

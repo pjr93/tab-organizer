@@ -41,7 +41,7 @@ Each main box is a window. Each sub item is a tab. Windows are laid out in two c
 
 Simply hover over and right click on a tab to instantly be brought to it! The board's own tab always shows in green, and the page is called "Reflection Board".
 
-You can always navigate back to it by clicking the icon on the toolbar at the top, or with `Alt+Shift+Home`.
+You can always navigate back to it by clicking the icon on the toolbar at the top, or with `Alt+Shift+Home`. The board scrolls to the window you came from and briefly highlights it.
 
 ### Tab switcher
 
@@ -70,7 +70,7 @@ You can create a new tab by hovering the mouse and clicking the "+" button at th
 
 You can also close an entire window by clicking the "x" at the top right corner of the main box.
 
-You can open a new window by clicking the "+" outside of all the other windows.
+You can open a new window by clicking the "+" outside of all the other windows. The board scrolls to the new window and highlights it (the same happens when you drag tabs out of all the boxes to make a new window). Adding a tab with a window's own "+" doesn't scroll.
 
 Drag a window by the empty space in its box (around or between its tabs) onto another box to move it there: the top half of a box drops it before that box, the bottom half after it. The browser has no window order of its own, so the board remembers this order itself; saves and autosaves keep it, and restoring recreates the windows in that order.
 
