@@ -5,10 +5,7 @@
   "description": "Collects tabs and windows and allows a 2D environment for regrouping.",
   "permissions": [
     "tabs",
-    "windows",
     "storage",
-    "nativeMessaging",
-    "activeTab",
     "favicon"
   ],
   "background": {
@@ -25,21 +22,21 @@
         "default": "Alt+Shift+Home",
         "mac": "Alt+Shift+Home"
       },
-      "description": "Goes to the next tab in the visited list"
+      "description": "Opens or focuses the Reflection Board"
     },
     "next_tab": {
       "suggested_key": {
         "default": "Alt+Shift+Right",
         "mac": "Alt+Shift+Right"
       },
-      "description": "Goes to the next tab in the visited list"
+      "description": "Goes to the next (more recent) tab in the recently used list"
     },
     "prev_tab": {
       "suggested_key": {
         "default": "Alt+Shift+Left",
         "mac": "Alt+Shift+Left"
       },
-      "description": "Goes to the next tab in the visited list"
+      "description": "Goes to the previous (older) tab in the recently used list"
     }
   },
   "icons": {

@@ -16,10 +16,6 @@ let selectedTabIds = new Set();
 let groupData; //probably should be json object
 let windowData;
 let currentActiveTabId = null;
-let tabHistory = []
-let tabCounter = null
-let tabHistoryOn = true
-let tabHistoryActive = true
 const appUrlPrefix = chrome.runtime.getURL('');
 const APP_URL = chrome.runtime.getURL('app.html');
 const APP_TITLE = 'Reflection Board';
@@ -89,55 +85,12 @@ function highlightActiveTab() {
 }
 // message events - highlightActiveTab - syncGroupDataFromBrowser
 chrome.runtime.onMessage.addListener((message) => {
+    // Tab history itself lives in background.js; the board only shows the glow.
     if (message.type === "active_tab_changed") {
         currentActiveTabId = message.tabId;
-        //I should store the appUrl globally
-        console.log('tabHistoryOn:', tabHistoryOn)
-        if (tabHistoryOn) {
-            if (tabCounter !== null && tabCounter !== 0) // there seems to be an issue adding the first element multiple times
-                tabHistory.push(message.tabId) // this should really not occur while scrolling through tab history
-            tabCounter = null
-        }
-        tabHistoryOn = true
         highlightActiveTab();
     }
     if (message.type === "sync_browser_state") { syncGroupDataFromBrowser(); }
-    if (message.type === "goto_next_tab") {
-        tabHistoryOn = false
-        var length = tabHistory.length
-        if (tabCounter === null) {
-            tabCounter = length - 1
-        }
-        tabCounter++
-        var nextTab = tabHistory[tabCounter % length]
-        console.log(nextTab)
-        chrome.tabs.get(nextTab, (tab) => {
-            chrome.tabs.update(nextTab, { active: true }, () => {
-                console.log('Counter:', tabCounter)
-                console.log('tab history:', tabHistory)
-                if (tabHistoryActive) {
-                    chrome.windows.update(tab.windowId, { focused: true });
-                }
-            });
-        })
-
-    }
-    if (message.type === "goto_prev_tab") {
-        tabHistoryOn = false
-        var length = tabHistory.length
-        if (tabCounter === null) {
-            tabCounter = tabHistory.length - 1
-        } tabCounter--
-
-        var prevTab = tabHistory[tabCounter % length]
-        chrome.tabs.get(prevTab, (tab) => {
-            chrome.tabs.update(prevTab, { active: true }, () => {
-                console.log('Counter:', tabCounter)
-                console.log('tab history:', tabHistory)
-                if (tabHistoryActive) { chrome.windows.update(tab.windowId, { focused: true }); }
-            });
-        })
-    }
 });
 
 async function openTabsSequentially(tabs, windowId) {
@@ -896,10 +849,15 @@ document.body.addEventListener('click', (e) => {
     }
 });
 
+// "view history in app": when checked, history hotkeys switch the active tab in
+// its window but keep focus on the board, so you can watch the glow move here.
+// The setting is read by background.js, which performs the navigation.
 const checkbox = document.getElementById('active-tab-history')
+chrome.storage.local.get(['historyStayInApp'], (result) => {
+    checkbox.checked = !!(result && result.historyStayInApp);
+});
 checkbox.addEventListener('change', (e) => {
-    tabHistoryActive = e.target.checked
-    console.log('tabHistoryActive:', tabHistoryActive)
+    chrome.storage.local.set({ historyStayInApp: e.target.checked });
 })
 
 // app.js or content script
