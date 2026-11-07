@@ -21,11 +21,25 @@ let tabCounter = null
 let tabHistoryOn = true
 let tabHistoryActive = true
 const appUrlPrefix = chrome.runtime.getURL('');
+const APP_URL = chrome.runtime.getURL('app.html');
+const APP_TITLE = 'Reflection Board';
+
+// Identify the board tab by URL rather than title, so a web page titled
+// "Reflection Board" is never mistaken for it. Saved files may come from an
+// install with a different extension id, so for those we also accept any
+// extension's app.html carrying the board's title.
+function isBoardTab(tab) {
+    if (!tab || !tab.url) return false;
+    if (tab.url.startsWith(APP_URL)) return true;
+    return tab.url.startsWith('chrome-extension://') && tab.url.includes('/app.html') && tab.title === APP_TITLE;
+}
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Built with DOM nodes / textContent (not innerHTML) so page titles and URLs
+// can never inject markup into the extension page.
 function showTabPreview(tab, anchorEl) {
     let preview = document.getElementById('tab-hover-preview');
     if (!preview) {
@@ -33,13 +47,27 @@ function showTabPreview(tab, anchorEl) {
         preview.id = 'tab-hover-preview';
         document.body.appendChild(preview);
     }
-    preview.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;">
-      ${tab.favIconUrl ? `<img src="${tab.favIconUrl}" width="20" height="20" style="border-radius:3px;">` : ""}
-      <b>${tab.title || tab.text}</b>
-    </div>
-    <div style="color:#8ab4f8">${tab.url || ""}</div>
-  `;
+    preview.replaceChildren();
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    if (tab.favIconUrl) {
+        const img = document.createElement('img');
+        img.src = tab.favIconUrl;
+        img.width = 20;
+        img.height = 20;
+        img.style.borderRadius = '3px';
+        header.appendChild(img);
+    }
+    const titleEl = document.createElement('b');
+    titleEl.textContent = tab.title || tab.text || '';
+    header.appendChild(titleEl);
+
+    const urlEl = document.createElement('div');
+    urlEl.style.color = '#8ab4f8';
+    urlEl.textContent = tab.url || '';
+
+    preview.append(header, urlEl);
     const rect = anchorEl.getBoundingClientRect();
     preview.style.top = (rect.bottom + 6) + "px";
     preview.style.left = (rect.left) + "px";
@@ -112,58 +140,9 @@ chrome.runtime.onMessage.addListener((message) => {
     }
 });
 
-//straightfoward I think. Must be async due to the async nature of chrome.windows.getAll
-async function maximizeAllWindowsAndFocusAppTab() {
-    // Maximize all windows
-    const windows = await new Promise(resolve => chrome.windows.getAll({}, resolve));
-    for (const win of windows) {
-        chrome.windows.update(win.id, { state: 'maximized' }, () => { });
-    }
-
-    // Focus the tab running app.html
-    const appUrl = chrome.runtime.getURL('app.html');
-    chrome.tabs.query({ url: appUrl }, (tabs) => { //should only be one
-        if (tabs.length > 0) {
-            const tab = tabs[0];
-            chrome.tabs.update(tab.id, { active: true }, () => {
-                chrome.windows.update(tab.windowId, { focused: true });
-            });
-        }
-    });
-}
-
-// I think this function can go. It should just be another initialization, but with different parameters = TRY 1 - syncGroupDataFromBrowser - maximizeAllWindowsAndFocusAppTab
-// or I can write it myself to first close every tab except reflection board. Then load the windows with the first tab of each one. The reflection board can be saved, but
-//if the reflection board is detected on load, it does not make a new window. When creating the tabs, it first needs to check if app.html is a part of the list of tabs
-function createWindow(options) {
-    return new Promise((resolve, reject) => {
-        chrome.windows.create(options, (newWindow) => {
-            if (chrome.runtime.lastError || !newWindow) {
-                reject(chrome.runtime.lastError || new Error("Failed to create window"));
-            } else {
-                resolve(newWindow);
-            }
-        });
-    });
-}
-
-function createTab(options) {
-    return new Promise((resolve, reject) => {
-        chrome.tabs.create(options, (tab) => {
-            if (chrome.runtime.lastError || !tab) {
-                reject(chrome.runtime.lastError || new Error("Failed to create tab"));
-            } else { resolve(tab); }
-        });
-    });
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 async function openTabsSequentially(tabs, windowId) {
     for (const tab of tabs) {
-        if (tab.title !== "Reflection Board") { //might want to do check for Reflection Board so Reflection board's tabs go in the current app location
+        if (!isBoardTab(tab)) {
             chrome.tabs.create({ windowId, url: tab.url, active: false });
             await sleep(500);
         }
@@ -282,31 +261,6 @@ function uploadStateFromFile(file, append = false) {
     reader.readAsText(file);
 }
 
-function groupTabsByWindow(tabs, titlesMap) { //I think the titles map here is annoying. the tabs should be sufficient (which is why group data should have this stuff. This should take the window object and get the tabs from there)
-    const groups = {};
-    for (const tab of tabs) {
-        if (
-            !tab.url ||
-            tab.url.startsWith(chrome.runtime.getURL('')) || // exclude your extension pages
-            tab.url.startsWith('brave://') // exclude chrome internal pages (should I really?)
-        ) continue;
-
-        if (!groups[tab.windowId]) groups[tab.windowId] = [];
-        groups[tab.windowId].push({
-            id: tab.id,
-            title: tab.title,
-            url: tab.url,
-            windowId: tab.windowId,
-            groupId: tab.groupId || null,
-        });
-    }
-    return Object.entries(groups).map(([windowId, tabs]) => ({
-        windowId: Number(windowId),
-        title: titlesMap[windowId] || '_',
-        tabs,
-    }));
-}
-
 function saveStateInternal() {
     chrome.windows.getAll({ populate: true }, (windows) => {
         const appUrl = chrome.runtime.getURL('app.html');
@@ -362,8 +316,8 @@ function loadStateInternal() {
 function createEditableTitleBox(parentElement, windowId) {
     const title = document.createElement('input');
     title.className = 'editable-title';
-    title.id = windowId
-    title.value= titles[windowId] || "";
+    title.id = `window-title-${windowId}`;
+    title.value = titles[windowId] || "";
     parentElement.appendChild(title);
     
     title.addEventListener('change', () =>{
@@ -374,10 +328,22 @@ function createEditableTitleBox(parentElement, windowId) {
     return title;
 }
 
+// Drop titles for windows that no longer exist (window ids are not reused
+// within a browser session, so a stale entry can never be shown again).
+function pruneTitles(windows) {
+    const live = new Set(windows.map(w => String(w.id)));
+    let changed = false;
+    for (const id of Object.keys(titles)) {
+        if (!live.has(id)) { delete titles[id]; changed = true; }
+    }
+    if (changed) chrome.storage.local.set({ titles });
+}
+
 //Gets tab data from the chrome API - renderBoard
 function syncGroupDataFromBrowser() {
     chrome.windows.getAll({ populate: true }, (windows) => {
         if (chrome.runtime.lastError) return;
+        pruneTitles(windows);
         groupData = windows.map(win => {
             return (win.tabs || []).map(tab => ({
                 id: tab.id, // also seems redundant
@@ -646,7 +612,7 @@ function createGridItem(itemObj) {
     if (itemObj.id === currentActiveTabId) {
         item.classList.add('active-tab-glow');
     }
-    if (item.textContent == "Reflection Board") {
+    if (isBoardTab(itemObj)) {
         item.style.background = "green";
     }
 
@@ -749,11 +715,6 @@ function removeFromGroupData(id) { //hash is useable here
     for (const group of groupData) {
         const index = group.findIndex(item => item.id === id);
         if (index !== -1) {
-            const windowId = group[0]?.windowId;
-            if (windowId && titles[windowId]) {
-                delete titles[windowId];
-                chrome.storage.local.set({ titles });
-            }
             group.splice(index, 1);
             break;
         }
@@ -986,4 +947,9 @@ if (document.readyState === 'loading') {
 window.addEventListener('load', restoreScroll);  */
 
 
-renderBoard();
+// Startup: load persisted window titles first, then pull the live browser state.
+// (groupData is undefined until the first sync, so we must not render before it.)
+chrome.storage.local.get(['titles'], (result) => {
+    if (result && result.titles) titles = result.titles;
+    syncGroupDataFromBrowser();
+});
