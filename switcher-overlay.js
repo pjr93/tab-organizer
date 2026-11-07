@@ -5,7 +5,6 @@
 // - Alt+Shift+Left/Right are browser shortcuts handled by background.js;
 //   Alt+Shift+Up/Down are caught here and forwarded, since Chrome allows only
 //   four suggested extension shortcuts.
-// - Tapping Alt+Shift on its own is also caught here and opens the switcher.
 // - While the overlay is shown: arrows move the highlight, Enter switches,
 //   Esc / clicking outside / leaving the page cancels. All key and mouse input
 //   is captured so it doesn't reach the page; the banner says so.
@@ -164,8 +163,6 @@
         cursor = newCursor;
         active = true;
         done = false;
-        tapArmed = false; // the keys held while opening don't count as a tap
-        tapSpoiled = false;
         // Focus inside an iframe means its key events don't reach this document;
         // pull focus back to the top page so Enter/Esc/arrows reach the overlay.
         const focused = document.activeElement;
@@ -178,29 +175,7 @@
         return e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
     }
 
-    // Tapping Alt+Shift on its own (press both, release with no other key or
-    // click in between) also opens the switcher, like Alt+Tab.
-    let tapArmed = false;
-    let tapSpoiled = false;
-    function trackTap(e) {
-        const isMod = e.key === 'Alt' || e.key === 'Shift';
-        if (e.type === 'keydown') {
-            if (!isMod || e.ctrlKey || e.metaKey) tapSpoiled = true;
-            else if (e.altKey && e.shiftKey && !tapSpoiled) tapArmed = true;
-            return;
-        }
-        if (e.type === 'keyup' && isMod) {
-            if (tapArmed && !tapSpoiled) send({ type: 'switcher_tap_request' });
-            tapArmed = false;
-            // Wait until both modifiers are up before a new tap can start.
-            tapSpoiled = e.altKey || e.shiftKey;
-        }
-    }
-    window.addEventListener('mousedown', () => { tapSpoiled = true; }, true);
-    window.addEventListener('blur', () => { tapArmed = false; tapSpoiled = false; });
-
     function onKey(e) {
-        if (!active) trackTap(e);
         if (!active) {
             // Alt+Shift+Up/Down opens the switcher (Left/Right are browser shortcuts).
             if (e.type === 'keydown' && isAltShiftOnly(e) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {

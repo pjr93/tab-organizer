@@ -426,12 +426,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.tab) onHistoryKey(message.step === 1 ? 1 : -1);
     return;
   }
-  if (message.type === "switcher_tap_request") {
-    // Alt+Shift tapped on its own: open on the previous tab. Never moves an
-    // open switcher (an Alt+Shift+arrow press also ends with this release).
-    if (sender.tab) queueSwitcher(() => (switcher ? undefined : openSwitcher(1)));
-    return;
-  }
   if (message.type === "switcher_ready") {
     sendResponse(switcher && switcher.mode === "window" ? { items: switcher.items, cursor: switcher.cursor } : null);
     return;

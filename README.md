@@ -45,14 +45,14 @@ You can always navigate back to it by clicking the icon on the toolbar at the to
 
 ### Tab switcher
 
-Tapping `Alt+Shift` (press both, then let go without pressing anything else), or `Alt+Shift` + any arrow key, opens the tab switcher, a list of your recently used tabs (most recent at the top, the Reflection Board included), like Alt+Tab. It works on any page, whether or not the board is open.
+`Alt+Shift` + any arrow key opens the tab switcher, a list of your recently used tabs (most recent at the top, the Reflection Board included), like Alt+Tab. It works on any page, whether or not the board is open.
 
-- A tap of `Alt+Shift`, `Alt+Shift+Left` or `Alt+Shift+Down` opens it on the previous tab; `Alt+Shift+Right` / `Alt+Shift+Up` on the current one.
+- `Alt+Shift+Left` / `Alt+Shift+Down` opens it on the previous tab; `Alt+Shift+Right` / `Alt+Shift+Up` on the current one.
 - It appears on top of the page you're on, with a green banner reading "keyboard input is captured": while it's up, your keys and clicks go to the switcher, not the page.
 - Use the arrow keys to move the highlight (Left/Down = older, Right/Up = newer). You can let go of Alt+Shift.
 - Press **Enter** to switch to the highlighted tab, or click a row. Esc or clicking outside the list cancels.
 - Only the tab you actually switch to moves to the front of the list.
-- On pages extensions aren't allowed to draw on (chrome:// pages, the web store, the new tab page, PDFs), or while you're typing in the address bar, the list opens in a small separate window instead and works the same way. (There, only Alt+Shift+Left/Right open it; tapping Alt+Shift alone does nothing.)
+- On pages extensions aren't allowed to draw on (chrome:// pages, the web store, the new tab page, PDFs), or while you're typing in the address bar, the list opens in a small separate window instead and works the same way. (There, only Alt+Shift+Left/Right open it.)
 
 "view history in app" checkbox: when checked, switching activates the tab inside its window but keeps you where you were (e.g. on the board, so you can watch the highlight move). When unchecked, the tab's window comes to the front.
 
