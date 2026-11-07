@@ -43,11 +43,24 @@ Simply hover over and right click on a tab to instantly be brought to it! The bo
 
 You can always navigate back to it by clicking the icon on the toolbar at the top, or with `Alt+Shift+Home`.
 
-`Alt+Shift+Left` / `Alt+Shift+Right`: step through your recently used tabs, like Alt+Tab. Left goes to older tabs, Right comes back toward newer ones. About a second after your last press (or as soon as you switch tabs some other way) the tab you landed on moves to the front of the list. This works whether or not the board is open.
+### Tab switcher
 
-"view history in app" checkbox: when checked, the history hotkeys switch tabs inside their windows but keep you on the board, so you can watch the highlight move. When unchecked, they bring the tab's window to the front.
+`Alt+Shift+Left` / `Alt+Shift+Right` opens the tab switcher, a small window listing your recently used tabs (most recent at the top), like Alt+Tab. It works on any page, whether or not the board is open.
 
-You can change any of these shortcuts at `chrome://extensions/shortcuts` (or your browser's equivalent).
+- While it's open, a blue banner reads "keyboard input is captured": your keys go to the switcher, not to the page.
+- Keep holding Alt and press Left (older) / Right (newer), or use the arrow keys, to move the highlight.
+- **Release Alt** (or press Enter) to switch to the highlighted tab. Esc or clicking outside cancels. You can also click a row.
+- Only the tab you actually switch to moves to the front of the list.
+
+"view history in app" checkbox: when checked, switching activates the tab inside its window but keeps you where you were (e.g. on the board, so you can watch the highlight move). When unchecked, the tab's window comes to the front.
+
+Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing keyboard language. If you have more than one input language and it gets in the way, change the extension's shortcuts at `chrome://extensions/shortcuts` (or your browser's equivalent).
+
+## Tab icons and previews
+
+A 🔊 next to a tab means it's playing sound and 🔇 means it's muted. Click the icon to mute or unmute without leaving the board.
+
+"full preview" checkbox: hovering a tab shows a 300×300 screenshot of it, labelled with when it was taken. Screenshots are taken shortly after you view a tab, right before you leave it with the switcher or the board button/hotkey, and every 30 seconds for the tab you're looking at, so they show the tab roughly as you left it (e.g. a paused video). If a tab has no screenshot yet (e.g. it was restored unloaded), hover for half a second: the page is loaded muted in a small window over the preview, captured once it finishes loading, and the window closes. Browser-internal pages (chrome://, the web store) can't be previewed. This feature is why the extension asks for access to all websites; screenshots stay on your computer.
 
 ## Creating tabs and windows
 
@@ -72,7 +85,8 @@ If you drag a tab outside of all the boxes, it will open that tab in a new windo
 There are two kinds of save states: **internal** and **JSON file**. Both save every window, its tabs and its title.
 
 - **Save (Internal)** / `Ctrl+S`: keeps one snapshot in the browser's extension storage (each save overwrites the previous one).
-- **Load (Internal)**: asks for confirmation, then replaces your open tabs with that snapshot.
+- **autosave** checkbox: saves your session automatically about 10 seconds after tabs or windows change, into its own slot (it never overwrites your Ctrl+S save). When the browser starts, the last autosave is kept as "Autosave from previous browser session", so a fresh empty session can't overwrite it.
+- **Load (Internal)**: opens a list of the available internal saves (manual, autosave, previous session) with their time and size. Choosing one replaces your open tabs with it.
 - **Save JSON**: downloads `tab_layout.json`. I recommend saving it in the app's "saved-tabs" folder. The download icon on each window box saves just that window.
 - **Upload JSON**: replaces your open tabs with the windows in a saved file.
 - **Add JSON**: opens the windows from a saved file alongside the tabs you already have.
