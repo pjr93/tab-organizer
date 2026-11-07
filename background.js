@@ -90,7 +90,7 @@ function scheduleAutosave() {
 
 async function runAutosave() {
   autosaveTimer = null;
-  const { autosaveEnabled, titles = {} } = await chrome.storage.local.get(["autosaveEnabled", "titles"]);
+  const { autosaveEnabled, titles = {}, windowOrder = [] } = await chrome.storage.local.get(["autosaveEnabled", "titles", "windowOrder"]);
   if (!autosaveEnabled) return;
 
   // The board sets this while restoring, so we don't save a half-built session.
@@ -101,6 +101,9 @@ async function runAutosave() {
   }
 
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+  // Save in the board's window order (windows it hasn't seen yet go last).
+  const rank = id => { const i = windowOrder.indexOf(id); return i === -1 ? Infinity : i; };
+  windows.sort((a, b) => rank(a.id) - rank(b.id));
   const saved = serializeTabGroups(windows.map(w => w.tabs || []), titles);
   if (!saved.some(w => w.tabs.some(t => !isBoardTab(t)))) return; // nothing worth saving
   await chrome.storage.local.set({ autoSave: saved, autoSavedAt: Date.now() });
@@ -114,9 +117,9 @@ chrome.runtime.onStartup.addListener(async () => {
   }
 });
 
-// Window titles are edited on the board; include renames in the next autosave.
+// Window titles and order are edited on the board; include them in the next autosave.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.titles) scheduleAutosave();
+  if (area === "local" && (changes.titles || changes.windowOrder)) scheduleAutosave();
 });
 
 chrome.runtime.onMessage.addListener((message) => {
