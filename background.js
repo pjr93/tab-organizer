@@ -504,7 +504,7 @@ chrome.commands.onCommand.addListener((command) => {
 // the feature was turned on (e.g. restored unloaded tabs) simply have none.
 // Screenshots are shrunk and stored in IndexedDB (PreviewStore in shared.js).
 
-const PREVIEW_WIDTH = 600;          // stored width in px (shown at 300px)
+const PREVIEW_WIDTH = 600;          // stored width in px (shown at 1/8 of the capture size)
 const CAPTURE_SPACING_MS = 600;     // captureVisibleTab allows ~2 calls/second
 
 async function previewEnabled() {
@@ -533,16 +533,20 @@ function queueCapture(fn) {
   return run;
 }
 
+// Returns the shrunk JPEG plus the capture's original pixel size (the board
+// shows previews at 1/8 of that size, keeping the tab's aspect ratio).
 async function shrinkScreenshot(dataUrl) {
   const blob = await (await fetch(dataUrl)).blob();
   const bitmap = await createImageBitmap(blob);
-  const scale = Math.min(1, PREVIEW_WIDTH / bitmap.width);
-  const w = Math.round(bitmap.width * scale);
-  const h = Math.round(bitmap.height * scale);
+  const width = bitmap.width;
+  const height = bitmap.height;
+  const scale = Math.min(1, PREVIEW_WIDTH / width);
+  const w = Math.round(width * scale);
+  const h = Math.round(height * scale);
   const canvas = new OffscreenCanvas(w, h);
   canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
-  return canvas.convertToBlob({ type: "image/jpeg", quality: 0.75 });
+  return { blob: await canvas.convertToBlob({ type: "image/jpeg", quality: 0.75 }), width, height };
 }
 
 // Screenshot the visible tab of `windowId` and store it under that tab's id.
@@ -558,8 +562,8 @@ async function captureVisible(windowId, expectTabId) {
       throw new Error("Tab can't be captured right now");
     }
     const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 80 });
-    const blob = await shrinkScreenshot(dataUrl);
-    await PreviewStore.put(active.id, { url: active.url, blob, at: Date.now() });
+    const { blob, width, height } = await shrinkScreenshot(dataUrl);
+    await PreviewStore.put(active.id, { url: active.url, blob, width, height, at: Date.now() });
   });
 }
 

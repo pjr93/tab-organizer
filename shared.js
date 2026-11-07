@@ -51,7 +51,8 @@ function serializeTabGroups(groups, titles) {
 
 // Tab screenshots for the full preview, kept in IndexedDB (shared by the board
 // and the service worker). Keyed by tab id; each record is
-// { url, blob, at } where `url` is the address the screenshot shows.
+// { url, blob, width, height, at } where `url` is the address the screenshot
+// shows and width/height are the original capture size in pixels.
 const PreviewStore = (() => {
     let dbPromise = null;
     function open() {

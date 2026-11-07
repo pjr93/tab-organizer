@@ -12,6 +12,11 @@ let placeholder = null;
 let nextItemId = 1;
 let windowGroupData = [];
 let titles = {};
+// Board order of windows (window ids). The browser API has no window order to
+// read or set, so the board keeps its own; new windows are appended. Saves are
+// written in this order and restores create windows in it, so it carries over.
+let windowOrder = [];
+let draggedWindowId = null;
 let selectedTabIds = new Set();
 let groupData; //probably should be json object
 let windowData;
@@ -50,6 +55,7 @@ function showTabPreview(tab, anchorEl) {
     preview.append(header, urlEl);
 
     const token = ++previewToken;
+    preview.style.maxWidth = '';
     preview.style.display = "block";
     positionPreview(preview, anchorEl);
     if (fullPreviewEnabled && !isBoardTab(tab)) fillPreviewShot(tab, preview, anchorEl, token);
@@ -71,6 +77,7 @@ function positionPreview(preview, anchorEl) {
 let previewToken = 0;      // bumps on every show/hide so stale async work is ignored
 let previewObjectUrl = null;
 let fullPreviewEnabled = false;
+const PREVIEW_SCALE = 8;   // previews show at 1/8 of the captured size
 
 // Show the last screenshot taken of this tab, if it still matches the tab's
 // URL. Tabs are never loaded just to preview them, so a tab you haven't viewed
@@ -85,6 +92,15 @@ async function fillPreviewShot(tab, preview, anchorEl, token) {
         previewObjectUrl = URL.createObjectURL(record.blob);
         const shotBox = document.createElement('div');
         shotBox.id = 'preview-shot';
+        // 1/8 of the original capture size, so the box keeps the tab's aspect
+        // ratio. Older screenshots have no size stored: 240px wide, natural ratio.
+        if (record.width && record.height) {
+            shotBox.style.width = Math.round(record.width / PREVIEW_SCALE) + 'px';
+            shotBox.style.height = Math.round(record.height / PREVIEW_SCALE) + 'px';
+        } else {
+            shotBox.style.width = '240px';
+        }
+        preview.style.maxWidth = `max(420px, ${shotBox.style.width})`;
         const img = document.createElement('img');
         img.src = previewObjectUrl;
         img.alt = 'Tab preview';
@@ -240,6 +256,9 @@ async function restoreState(saved, { replace = false } = {}) {
             if (win.title && win.title !== '_' && win.title !== '-') {
                 titles[newWindow.id] = win.title;
             }
+            // Keep the saved board order: each restored window goes to the end.
+            windowOrder = windowOrder.filter(id => id !== newWindow.id).concat(newWindow.id);
+            chrome.storage.local.set({ windowOrder });
 
             const results = await runLimited(rest, 6, tab => createUnloadedTab(newWindow.id, tab.url));
             results.forEach((r, i) => { if (!r.ok) failed.push(rest[i].url); });
@@ -381,6 +400,43 @@ function pruneTitles(windows) {
     if (changed) chrome.storage.local.set({ titles });
 }
 
+// Sort windows into the board's saved order; windows not in it yet (new ones)
+// go at the end. Closed windows are dropped from the saved order.
+function applyWindowOrder(windows) {
+    const byId = new Map(windows.map(w => [w.id, w]));
+    const ordered = windowOrder.filter(id => byId.has(id)).map(id => byId.get(id));
+    const known = new Set(ordered.map(w => w.id));
+    for (const w of windows) if (!known.has(w.id)) ordered.push(w);
+    const newOrder = ordered.map(w => w.id);
+    if (newOrder.join() !== windowOrder.join()) {
+        windowOrder = newOrder;
+        chrome.storage.local.set({ windowOrder });
+    }
+    return ordered;
+}
+
+// Move a window box before/after another one on the board.
+function moveWindowOnBoard(movedId, targetId, after) {
+    const order = groupData.map(g => g[0] && g[0].windowId).filter(id => id != null);
+    const from = order.indexOf(movedId);
+    if (from === -1 || movedId === targetId) return;
+    order.splice(from, 1);
+    let to = order.indexOf(targetId);
+    if (to === -1) return;
+    if (after) to++;
+    order.splice(to, 0, movedId);
+    windowOrder = order;
+    chrome.storage.local.set({ windowOrder });
+    const byId = new Map(groupData.map(g => [g[0].windowId, g]));
+    groupData = order.map(id => byId.get(id));
+    renderBoard();
+}
+
+function clearWindowDropMarks() {
+    document.querySelectorAll('.child-grid.drop-before, .child-grid.drop-after')
+        .forEach(el => el.classList.remove('drop-before', 'drop-after'));
+}
+
 //Gets tab data from the chrome API - renderBoard
 // Only normal browser windows are shown; popup windows (the tab switcher, the
 // preview capture window, site popups) are left out.
@@ -388,6 +444,7 @@ function syncGroupDataFromBrowser() {
     chrome.windows.getAll({ populate: true, windowTypes: ['normal'] }, (windows) => {
         if (chrome.runtime.lastError) return;
         pruneTitles(windows);
+        windows = applyWindowOrder(windows);
         groupData = windows.map(win => {
             return (win.tabs || []).map(tab => ({
                 id: tab.id, // also seems redundant
@@ -499,7 +556,43 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     });
     group.appendChild(plusTabBtn);
 
+    // Drag handle for moving the whole window box (kept separate from the box
+    // itself so dragging tabs and editing the title still work).
+    const moveHandle = document.createElement('div');
+    moveHandle.className = 'window-move-handle';
+    moveHandle.textContent = '⠿';
+    moveHandle.title = 'Drag to move this window on the board';
+    moveHandle.draggable = true;
+    moveHandle.addEventListener('dragstart', e => {
+        e.stopPropagation();
+        draggedWindowId = windowId;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', 'window');
+        const r = group.getBoundingClientRect();
+        e.dataTransfer.setDragImage(group, e.clientX - r.left, e.clientY - r.top);
+        setTimeout(() => group.classList.add('window-dragging'), 0);
+    });
+    moveHandle.addEventListener('dragend', () => {
+        draggedWindowId = null;
+        group.classList.remove('window-dragging');
+        clearWindowDropMarks();
+    });
+    group.appendChild(moveHandle);
+
+    // Window being dragged over this box: mark the side it would land on
+    // (boxes flow left-to-right, so left half = before, right half = after).
+    function windowDropSide(e) {
+        const r = group.getBoundingClientRect();
+        return e.clientX > r.left + r.width / 2 ? 'after' : 'before';
+    }
+
     group.addEventListener('dragover', e => {
+        if (draggedWindowId != null) {
+            e.preventDefault();
+            clearWindowDropMarks();
+            if (draggedWindowId !== windowId) group.classList.add('drop-' + windowDropSide(e));
+            return;
+        }
         e.preventDefault();
         group.classList.add('dragover');
         if (!draggedItem) return;
@@ -518,7 +611,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
 
     group.addEventListener('dragleave', e => {
         if (e.relatedTarget && !group.contains(e.relatedTarget)) {
-            group.classList.remove('dragover');
+            group.classList.remove('dragover', 'drop-before', 'drop-after');
             clearPlaceholder();
         }
     });
@@ -526,6 +619,14 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     group.addEventListener('drop', e => {
         e.preventDefault();
         group.classList.remove('dragover');
+        if (draggedWindowId != null) {
+            const moved = draggedWindowId;
+            const side = windowDropSide(e);
+            draggedWindowId = null;
+            clearWindowDropMarks();
+            moveWindowOnBoard(moved, windowId, side === 'after');
+            return;
+        }
         if (!draggedItem || draggedId === null) return;
         let tabsToMove = Array.from(selectedTabIds).map(id => getItemById(id)).filter(Boolean);
         if (!tabsToMove.length) tabsToMove = [getItemById(draggedId)];
@@ -1020,7 +1121,8 @@ window.addEventListener('load', restoreScroll);  */
 
 // Startup: load persisted window titles first, then pull the live browser state.
 // (groupData is undefined until the first sync, so we must not render before it.)
-chrome.storage.local.get(['titles'], (result) => {
+chrome.storage.local.get(['titles', 'windowOrder'], (result) => {
     if (result && result.titles) titles = result.titles;
+    if (result && Array.isArray(result.windowOrder)) windowOrder = result.windowOrder;
     syncGroupDataFromBrowser();
 });

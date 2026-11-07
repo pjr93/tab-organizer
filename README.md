@@ -62,7 +62,7 @@ Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing key
 
 A 🔊 next to a tab means it's playing sound and 🔇 means it's muted. Click the icon to mute or unmute without leaving the board.
 
-"full preview" checkbox: hovering a tab shows a 300×300 screenshot of it, labelled with when it was taken. Screenshots are taken shortly after you view a tab, right before you leave it with the switcher or the board button/hotkey, and every 30 seconds for the tab you're looking at, so they show the tab roughly as you left it (e.g. a paused video). A tab is never loaded just to preview it, so a tab you haven't viewed since turning this on (e.g. one restored unloaded) shows no picture until you visit it. Browser-internal pages (chrome://, the web store) can't be previewed. The extension asks for access to all websites for this feature and for drawing the tab switcher over pages; screenshots stay on your computer.
+"full preview" checkbox: hovering a tab shows a screenshot of it at 1/8 of its real size (so it keeps the tab's shape), labelled with when it was taken. Screenshots are taken shortly after you view a tab, right before you leave it with the switcher or the board button/hotkey, and every 30 seconds for the tab you're looking at, so they show the tab roughly as you left it (e.g. a paused video). A tab is never loaded just to preview it, so a tab you haven't viewed since turning this on (e.g. one restored unloaded) shows no picture until you visit it. Browser-internal pages (chrome://, the web store) can't be previewed. The extension asks for access to all websites for this feature and for drawing the tab switcher over pages; screenshots stay on your computer.
 
 ## Creating tabs and windows
 
@@ -71,6 +71,8 @@ You can create a new tab by hovering the mouse and clicking the "+" button at th
 You can also close an entire window by clicking the "x" at the top right corner of the main box.
 
 You can open a new window by clicking the "+" outside of all the other windows.
+
+Drag a window's ⠿ handle (top-left corner of its box) onto another box to move it there: the left half of a box drops before it, the right half after it. The browser has no window order of its own, so the board remembers this order itself; saves and autosaves keep it, and restoring recreates the windows in that order.
 
 Click the title box in a window to name it. Names are kept while the window stays open (including when the board is reloaded) and are included in saves.
 
@@ -103,6 +105,5 @@ Doing a save then an upload at least once will cache that folder location (at le
 # To do
 
 - add persistences to chosen tabs. I.e. on load it keeps some of your tabs
-- allow movement of windows like tabs
 - why does the favicon url flicker on upload?
 - group tabs by parent host url. It should be a hotkey and button and then on right click it expands so that you can right click again to navigate
