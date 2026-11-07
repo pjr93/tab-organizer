@@ -955,6 +955,13 @@ const BOARD_COLUMNS = 2;
 let boardItems = []; // window boxes + the new-window button, in board order
 
 function layoutBoard() {
+    // Rebuilding empties the board for a moment, and measuring the columns
+    // mid-rebuild would let the browser clamp the scroll position to the
+    // shorter page. Hold the board's height and put the scroll position back,
+    // so closing, moving or updating windows/tabs never scrolls the board.
+    const keepX = window.scrollX;
+    const keepY = window.scrollY;
+    parentGrid.style.minHeight = `${parentGrid.offsetHeight}px`;
     const columns = Array.from({ length: BOARD_COLUMNS }, () => {
         const col = document.createElement('div');
         col.className = 'board-column';
@@ -967,6 +974,10 @@ function layoutBoard() {
         for (const col of columns) if (col.offsetHeight < target.offsetHeight) target = col;
         target.appendChild(el);
     }
+    parentGrid.style.minHeight = '';
+    // Only touch the scroll position if it moved: an unconditional scrollTo
+    // would cut short a "zoom to window" smooth scroll that is under way.
+    if (window.scrollX !== keepX || window.scrollY !== keepY) window.scrollTo(keepX, keepY);
 }
 
 // Re-place boxes when the board width changes (tab text wraps differently).
