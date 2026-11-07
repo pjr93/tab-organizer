@@ -556,28 +556,27 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     });
     group.appendChild(plusTabBtn);
 
-    // Drag handle for moving the whole window box (kept separate from the box
-    // itself so dragging tabs and editing the title still work).
-    const moveHandle = document.createElement('div');
-    moveHandle.className = 'window-move-handle';
-    moveHandle.textContent = '⠿';
-    moveHandle.title = 'Drag to move this window on the board';
-    moveHandle.draggable = true;
-    moveHandle.addEventListener('dragstart', e => {
-        e.stopPropagation();
+    // Move the whole window box by dragging its empty space (the padding and
+    // the gaps between tabs). Pressing on a tab, button or the title keeps
+    // their normal behaviour, so the box is only made draggable for presses
+    // that land directly on it.
+    group.addEventListener('mousedown', e => {
+        group.draggable = e.target === group;
+    });
+    group.addEventListener('dragstart', e => {
+        if (e.target !== group) return; // a tab being dragged (bubbled up)
         draggedWindowId = windowId;
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', 'window');
-        const r = group.getBoundingClientRect();
-        e.dataTransfer.setDragImage(group, e.clientX - r.left, e.clientY - r.top);
         setTimeout(() => group.classList.add('window-dragging'), 0);
     });
-    moveHandle.addEventListener('dragend', () => {
+    group.addEventListener('dragend', e => {
+        if (e.target !== group) return;
         draggedWindowId = null;
+        group.draggable = false;
         group.classList.remove('window-dragging');
         clearWindowDropMarks();
     });
-    group.appendChild(moveHandle);
 
     // Window being dragged over this box: mark the side it would land on
     // (boxes flow left-to-right, so left half = before, right half = after).

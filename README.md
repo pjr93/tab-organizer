@@ -72,7 +72,7 @@ You can also close an entire window by clicking the "x" at the top right corner 
 
 You can open a new window by clicking the "+" outside of all the other windows.
 
-Drag a window's ⠿ handle (top-left corner of its box) onto another box to move it there: the left half of a box drops before it, the right half after it. The browser has no window order of its own, so the board remembers this order itself; saves and autosaves keep it, and restoring recreates the windows in that order.
+Drag a window by the empty space in its box (around or between its tabs) onto another box to move it there: the left half of a box drops before it, the right half after it. The browser has no window order of its own, so the board remembers this order itself; saves and autosaves keep it, and restoring recreates the windows in that order.
 
 Click the title box in a window to name it. Names are kept while the window stays open (including when the board is reloaded) and are included in saves.
 

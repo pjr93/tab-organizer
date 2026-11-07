@@ -602,22 +602,9 @@
         }
 
         /* Moving window boxes on the board */
-        .window-move-handle {
-            position: absolute;
-            top: 2px;
-            left: 6px;
-            padding: 0 4px;
-            font-size: 16px;
-            line-height: 20px;
-            color: #666;
+        /* Empty space in a window box is the drag area for moving it */
+        .child-grid {
             cursor: grab;
-            user-select: none;
-            border-radius: 4px;
-        }
-
-        .window-move-handle:hover {
-            color: white;
-            background: #ffffff22;
         }
 
         .child-grid.window-dragging {
