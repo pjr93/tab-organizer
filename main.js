@@ -30,10 +30,6 @@ function isBoardTab(tab) {
     return tab.url.startsWith('chrome-extension://') && tab.url.includes('/app.html') && tab.title === APP_TITLE;
 }
 
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 // Built with DOM nodes / textContent (not innerHTML) so page titles and URLs
 // can never inject markup into the extension page.
 function showTabPreview(tab, anchorEl) {
@@ -93,174 +89,198 @@ chrome.runtime.onMessage.addListener((message) => {
     if (message.type === "sync_browser_state") { syncGroupDataFromBrowser(); }
 });
 
-async function openTabsSequentially(tabs, windowId) {
-    for (const tab of tabs) {
-        if (!isBoardTab(tab)) {
-            chrome.tabs.create({ windowId, url: tab.url, active: false });
-            await sleep(500);
-        }
-    }
-}
+/* ------------------------------------------------------------------ */
+/* Saving and restoring layouts                                        */
+/* ------------------------------------------------------------------ */
+// Saved format (same for JSON files and internal saves):
+//   [{ windowId, title, tabs: [{ id, title, url, windowId, groupId }] }, ...]
 
-function getCurrentWindow() { return new Promise(resolve => chrome.windows.getCurrent(resolve)); }
-
-function createWindow(url = "") { return new Promise(resolve => chrome.windows.create({ state: "maximized", focused: true, url: url }, resolve)); }
-
-function updateWindow(windowId) { return new Promise(resolve => chrome.windows.update(windowId, { focused: true }, resolve)); }
-
-// Assume openTabsSequentially is async and returns a Promise that resolves when done
-async function restoreState(firstToClose, restToClose, saved) {
-    // Close tabs synchronously without awaiting since tabs.remove accepts callback but can be fire and forget
-    for (const tabId of firstToClose) {
-        try {
-            chrome.tabs.remove(tabId);
-        } catch (e) { console.warn(`Failed to close tab ${tabId}:`, e); }
-    }
-    for (const tabId of restToClose) {
-        try {
-            chrome.tabs.remove(tabId);
-        } catch (e) { console.warn(`Failed to close tab ${tabId}:`, e); }
-    }
-
-    try {
-        for (const win of saved) {
-            console.log('sliced tabs:', win.tabs.length)
-            const prevWindow = await getCurrentWindow();
-            const newTabs = win.tabs.filter(t => t.title != 'Reflection Board')
-            const newWindow = await createWindow(url = newTabs[0].url);
-            await updateWindow(prevWindow.id);
-            await openTabsSequentially(newTabs.slice(1, newTabs.length), newWindow.id);
-        }
-    } catch (error) { console.error("Error restoring windows and tabs:", error); }
-}
-// this needs to be adapted for a per window basis - would there be an advantage in putting the data organization separate? - yes for saving individual windows
-//
-function downloadStateAsFile(groups = groupData) {
-    const saved = groups.map(group => {
-        if (!group.length) return null;
+// Convert board groups into the saved format.
+function serializeGroups(groups = groupData) {
+    return groups.map(group => {
+        if (!group || !group.length) return null;
         const windowId = group[0].windowId;
-        const title = titles[windowId] || '';
-        const tabs = group.map(tab => ({
-            id: tab.id,
-            title: tab.title,
-            url: tab.url,
-            windowId: tab.windowId,
-            groupId: tab.groupId || null,
-        }));
-        return { windowId, title, tabs };
-    }).filter(g => g !== null);
+        return {
+            windowId,
+            title: titles[windowId] || '',
+            tabs: group.map(tab => ({
+                id: tab.id,
+                title: tab.title,
+                url: tab.url,
+                windowId: tab.windowId,
+                groupId: tab.groupId || null,
+            })),
+        };
+    }).filter(Boolean);
+}
 
-    const jsonStr = JSON.stringify(saved, null, 2);
+// Throws a readable error if `saved` isn't a layout we can restore.
+// Returns the windows with board tabs and unusable entries removed.
+function prepareSavedLayout(saved) {
+    if (!Array.isArray(saved)) throw new Error('File is not a saved tab layout (expected a list of windows).');
+    const windows = saved
+        .filter(win => win && Array.isArray(win.tabs))
+        .map(win => ({
+            title: typeof win.title === 'string' ? win.title : '',
+            tabs: win.tabs.filter(t => t && typeof t.url === 'string' && t.url && !isBoardTab(t)),
+        }))
+        .filter(win => win.tabs.length > 0);
+    if (windows.length === 0) throw new Error('The saved layout contains no tabs to restore.');
+    return windows;
+}
+
+// Resolve once a newly created tab has committed its URL (or after a timeout),
+// so that discarding it keeps the right address.
+function waitForTabUrl(tabId, timeoutMs = 3000) {
+    return new Promise(resolve => {
+        const done = () => {
+            clearTimeout(timer);
+            chrome.tabs.onUpdated.removeListener(listener);
+            resolve();
+        };
+        const listener = (id, changeInfo) => {
+            if (id === tabId && (changeInfo.url || changeInfo.status === 'complete')) done();
+        };
+        const timer = setTimeout(done, timeoutMs);
+        chrome.tabs.onUpdated.addListener(listener);
+    });
+}
+
+// Create a background tab and unload it right away so it costs almost nothing
+// until the user opens it.
+async function createUnloadedTab(windowId, url) {
+    const tab = await chrome.tabs.create({ windowId, url, active: false });
+    await waitForTabUrl(tab.id);
+    try {
+        await chrome.tabs.discard(tab.id);
+    } catch (e) {
+        // Some pages (e.g. browser-internal ones) can't be discarded; leave them loaded.
+    }
+    return tab;
+}
+
+// Run `fn` over `items` with at most `limit` running at once.
+async function runLimited(items, limit, fn) {
+    const results = [];
+    let next = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) {
+            const i = next++;
+            try {
+                results[i] = { ok: true, value: await fn(items[i], i) };
+            } catch (error) {
+                results[i] = { ok: false, error };
+            }
+        }
+    });
+    await Promise.all(workers);
+    return results;
+}
+
+let restoreInProgress = false;
+
+// Recreate the saved windows. With replace=true, every existing tab except the
+// board is closed, but only after the saved windows have been created.
+async function restoreState(saved, { replace = false } = {}) {
+    if (restoreInProgress) {
+        alert('A restore is already in progress.');
+        return;
+    }
+    const windows = prepareSavedLayout(saved);
+    restoreInProgress = true;
+    const failed = [];
+    try {
+        const boardWindow = await chrome.windows.getCurrent();
+        const toClose = replace
+            ? (await chrome.tabs.query({})).filter(t => !isBoardTab(t)).map(t => t.id)
+            : [];
+
+        for (const win of windows) {
+            const [first, ...rest] = win.tabs;
+            let newWindow;
+            try {
+                newWindow = await chrome.windows.create({ state: 'maximized', focused: true, url: first.url });
+            } catch (e) {
+                // The first URL may be one the browser refuses to open; fall back to a blank window.
+                failed.push(first.url);
+                newWindow = await chrome.windows.create({ state: 'maximized', focused: true });
+            }
+            // Keep the user on the board while the rest of the window fills in.
+            await chrome.windows.update(boardWindow.id, { focused: true });
+
+            if (win.title && win.title !== '_' && win.title !== '-') {
+                titles[newWindow.id] = win.title;
+            }
+
+            const results = await runLimited(rest, 6, tab => createUnloadedTab(newWindow.id, tab.url));
+            results.forEach((r, i) => { if (!r.ok) failed.push(rest[i].url); });
+        }
+        chrome.storage.local.set({ titles });
+
+        if (toClose.length) {
+            await chrome.tabs.remove(toClose).catch(e => console.warn('Failed to close some tabs:', e));
+        }
+    } finally {
+        restoreInProgress = false;
+        syncGroupDataFromBrowser();
+    }
+
+    if (failed.length) {
+        console.warn('Tabs that could not be restored:', failed);
+        alert(`${failed.length} tab(s) could not be restored (see the console with F12 for the list).`);
+    }
+}
+
+function downloadStateAsFile(groups = groupData) {
+    const jsonStr = JSON.stringify(serializeGroups(groups), null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = 'tab_layout.json';
     a.click();
-    URL.revokeObjectURL(url);
+    // Give the download a moment to start before releasing the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-//requires restoreState so I need to alter it
+// append=false replaces the current session; append=true adds to it.
 function uploadStateFromFile(file, append = false) {
     const reader = new FileReader();
     reader.onload = async (e) => {
         try {
             const saved = JSON.parse(e.target.result);
-            const appTitle = 'Reflection Board'
-            var appLocation = {}
-            var i = 0
-            for (win of saved) {
-                var j = 0
-                for (tab of win.tabs) {
-                    if (tab.title == appTitle) {
-                        appLocation.winId = tab.windowId
-                        appLocation.tabId = tab.id
-                        appLocation.url = tab.url
-                        appLocation.appPosition = [i, j]
-                    } j++
-                } i++
-            }
-            var currentAppLocation = {}
-            var k = 0
-            for (group of groupData) {
-                var m = 0
-                for (item of group) {
-                    if (item.title == appTitle) {
-                        currentAppLocation.winId = item.windowId
-                        currentAppLocation.tabId = item.id
-                        currentAppLocation.url = item.url
-                        currentAppLocation.appPosition = [k, m]
-                    } m++
-                } k++
-            }
-            var firstToClose;
-            var restToClose;
-
-            if (!append) {
-                k = currentAppLocation.appPosition[0]
-                m = currentAppLocation.appPosition[1]
-                firstToClose = groupData[k].filter(element => element.title != appTitle).map(element => element.id)
-                restToCloseArr = groupData.filter((element, idx) => idx != k)
-                var restToClose = []
-                for (tabs of restToCloseArr) { restToClose = restToClose.concat(tabs.map(tab => tab.id)) }
-            } else { firstToClose = []; restToClose = [] }
-            console.log('to close', firstToClose, restToClose)
-            restoreState(firstToClose, restToClose, saved);
+            await restoreState(saved, { replace: !append });
         } catch (err) {
-            alert('check the console after pressing F12');
-            console.log(err)
+            console.error(err);
+            alert(`Could not load "${file.name}": ${err.message}`);
         }
     };
     reader.readAsText(file);
 }
 
+// Internal save: one snapshot kept in chrome.storage.local.
 function saveStateInternal() {
-    chrome.windows.getAll({ populate: true }, (windows) => {
-        const appUrl = chrome.runtime.getURL('app.html');
-        let appWindow = null;
-        const otherWindows = [];
-
-        windows.forEach(win => {
-            const hasAppTab = (win.tabs || []).some(tab => tab.url === appUrl);
-            if (hasAppTab) {
-                appWindow = win;
-            } else {
-                otherWindows.push(win);
-            }
-        });
-
-        function serializeWindow(win) {
-            return {
-                windowId: win.id,
-                title: titles[win.id] || '_',
-                tabs: (win.tabs || [])
-                    .filter(tab => tab.url && !tab.url.startsWith('chrome://'))
-                    .map(tab => ({
-                        id: tab.id,
-                        title: tab.title,
-                        url: tab.url,
-                        windowId: tab.windowId,
-                        groupId: tab.groupId || null,
-                    }))
-            };
+    const savedState = serializeGroups(groupData || []);
+    chrome.storage.local.set({ savedState, savedAt: Date.now() }, () => {
+        if (chrome.runtime.lastError) {
+            alert(`Internal save failed: ${chrome.runtime.lastError.message}`);
         }
-
-        const savedAppWindow = appWindow ? serializeWindow(appWindow) : null;
-        const savedOtherWindows = otherWindows.map(serializeWindow).filter(w => w.tabs.length > 0);
-
-        chrome.storage.local.set({ savedAppWindow, savedOtherWindows }, () => {
-            console.log('Saved app window and other windows', savedAppWindow, savedOtherWindows);
-        });
     });
 }
 
-//loads the state from local storage - restoreState
 function loadStateInternal() {
-    chrome.storage.local.get(['savedTabState'], (result) => {
-        if (result.savedTabState) {
-            restoreState(result.savedTabState);
-        } else {
-            alert("No saved internal tab state found.");
+    chrome.storage.local.get(['savedState', 'savedAt'], async (result) => {
+        if (!result || !result.savedState) {
+            alert("No internal save found. Press Ctrl+S or 'Save (Internal)' first.");
+            return;
+        }
+        const when = result.savedAt ? new Date(result.savedAt).toLocaleString() : 'an unknown time';
+        if (!confirm(`Replace all open tabs with the internal save from ${when}?`)) return;
+        try {
+            await restoreState(result.savedState, { replace: true });
+        } catch (err) {
+            console.error(err);
+            alert(`Could not load the internal save: ${err.message}`);
         }
     });
 }
@@ -349,41 +369,19 @@ function clearPlaceholder() {
     }
 }
 
-//moves to a new window - syncGroupDataFromBrowser
-function smartMoveTab(tabId, targetWindowId, targetIndex) {
-    if (targetWindowId == null) {
-        chrome.windows.getCurrent((prevWindow) => {
-            chrome.windows.create(
-                { state: "maximized", focused: true },
-                (newWindow) => {
-                    if (chrome.runtime.lastError) return;
-                    chrome.tabs.move(
-                        tabId,
-                        { windowId: newWindow.id, index: targetIndex || 0 },
-                        () => {
-                            chrome.windows.update(prevWindow.id, { focused: true }, () => {
-                                syncGroupDataFromBrowser();
-                            });
-                            if (newWindow.tabs && newWindow.tabs.length > 0) {
-                                const defaultTabId = newWindow.tabs[0].id;
-                                if (defaultTabId !== tabId) {
-                                    chrome.tabs.remove(defaultTabId, () => { });
-                                }
-                            }
-                        }
-                    );
-                }
-            );
-        });
-    } else {
-        chrome.tabs.move(
-            tabId,
-            { windowId: targetWindowId, index: targetIndex },
-            () => {
-                syncGroupDataFromBrowser();
-            }
-        );
+// Move tabs (in the given order) into a window so the first one lands at
+// `index` and the rest follow it. `index` counts only the tabs that are NOT
+// being moved. Done in two steps so it also works for tabs already in the
+// target window: first append them all to the end, then move the block, which
+// now sits entirely after `index`, into place.
+async function moveTabsToWindow(tabIds, windowId, index) {
+    try {
+        await chrome.tabs.move(tabIds, { windowId, index: -1 });
+        await chrome.tabs.move(tabIds, { windowId, index });
+    } catch (e) {
+        console.warn('Failed to move tabs', e);
     }
+    syncGroupDataFromBrowser();
 }
 
 function getDragAfterElement(container, x, y) {
@@ -415,7 +413,7 @@ function getDragAfterElement(container, x, y) {
     return afterElement;
 }
 
-// creates the group UI element which holds the tabs - createPlaceholder - removeFromGroupData - smartMoveTab - renderBoard - hideDropIndicator - deactivateOutsideOverlay - syncGroupDataFromBrowser - downloadStateAsFile - createGridItem - createEditableTextbox
+// creates the group UI element which holds the tabs - createPlaceholder - removeFromGroupData - moveTabsToWindow - renderBoard - hideDropIndicator - deactivateOutsideOverlay - syncGroupDataFromBrowser - downloadStateAsFile - createGridItem - createEditableTextbox
 function createGroup(items = [], idx, windowId = null, titleText = '-') {
     const group = document.createElement('div');
     group.className = 'child-grid';
@@ -467,25 +465,28 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         let tabsToMove = Array.from(selectedTabIds).map(id => getItemById(id)).filter(Boolean);
         if (!tabsToMove.length) tabsToMove = [getItemById(draggedId)];
         tabsToMove = tabsToMove.filter(Boolean);
+        // Keep the moved tabs in their on-screen order, not the order they were selected.
+        const screenOrder = Array.from(document.querySelectorAll('.grid-item')).map(el => Number(el.dataset.id));
+        tabsToMove.sort((a, b) => screenOrder.indexOf(a.id) - screenOrder.indexOf(b.id));
+        const movingIds = new Set(tabsToMove.map(t => t.id));
         for (const tab of tabsToMove) {
             removeFromGroupData(tab.id);
         }
+        // Drop position counted among the tabs that stay put (the dragged tiles
+        // are only hidden, so they must be excluded explicitly).
         const childrenArray = Array.from(group.children).filter(ch =>
-            ch.classList.contains('grid-item') || ch === placeholder
+            (ch.classList.contains('grid-item') && !movingIds.has(Number(ch.dataset.id))) || ch === placeholder
         );
         let newIndex = placeholder && placeholder.parentElement === group
             ? childrenArray.indexOf(placeholder)
             : childrenArray.length;
         clearPlaceholder();
-        let targetWindowId = null;
-        if (groupData[idx] && groupData[idx].length > 0) {
-            targetWindowId = groupData[idx][0].windowId;
-        } else {
-            targetWindowId = tabsToMove.length ? tabsToMove[0].windowId : null;
+        const targetWindowId = windowId != null
+            ? windowId
+            : (tabsToMove.length ? tabsToMove[0].windowId : null);
+        if (targetWindowId != null && tabsToMove.length) {
+            moveTabsToWindow(tabsToMove.map(t => t.id), targetWindowId, newIndex);
         }
-        tabsToMove.forEach((tab, i) => {
-            smartMoveTab(tab.id, targetWindowId, newIndex + i);
-        });
         if (!groupData[idx]) groupData[idx] = [];
         groupData[idx].splice(newIndex, 0, ...tabsToMove);
         renderBoard();
@@ -786,15 +787,13 @@ function renderBoard() {
     //console.log("groupData:", groupData)
 }
 
-/* document.getElementById('internal-save-btn').addEventListener('click', () => {
-    //saveStateInternal();
-    console.log('not today criminal!')
+document.getElementById('internal-save-btn').addEventListener('click', () => {
+    saveStateInternal();
 });
 
 document.getElementById('internal-load-btn').addEventListener('click', () => {
-    //loadStateInternal();
-    console.log('not today criminal!')
-}); */
+    loadStateInternal();
+});
 
 document.getElementById('download-btn').addEventListener('click', () => {
     downloadStateAsFile();
@@ -811,16 +810,19 @@ document.getElementById('add-btn').addEventListener('click', () => {
     addFileInput.click();
 });
 
+// Clear the input after reading so choosing the same file again still fires 'change'.
 uploadFileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        uploadStateFromFile(e.target.files[0]);
+        uploadStateFromFile(e.target.files[0], false);
     }
+    e.target.value = '';
 });
 
 addFileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        uploadStateFromFile(e.target.files[0], append = true);
+        uploadStateFromFile(e.target.files[0], true);
     }
+    e.target.value = '';
 });
 
 // Ctrl+S triggers internal save only
