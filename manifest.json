@@ -37,6 +37,13 @@
       },
       "description": "Opens or focuses the Reflection Board"
     },
+    "open_switcher": {
+      "suggested_key": {
+        "default": "Alt+Shift+Q",
+        "mac": "Alt+Shift+Q"
+      },
+      "description": "Opens the tab switcher on the previous tab (press again to go further back)"
+    },
     "next_tab": {
       "suggested_key": {
         "default": "Alt+Shift+Right",

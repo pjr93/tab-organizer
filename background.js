@@ -503,6 +503,7 @@ function onHistoryKey(step) {
 chrome.commands.onCommand.addListener((command) => {
   if (command === "prev_tab") onHistoryKey(1);       // older
   else if (command === "next_tab") onHistoryKey(-1); // newer
+  else if (command === "open_switcher") onHistoryKey(1); // Alt+Shift+Q: same as Left
   else if (command === "home") openOrFocusBoard();
 });
 
