@@ -697,29 +697,19 @@
         }
 
         #pick-list {
-            max-height: 40vh;
+            height: 36vh;
             overflow-y: auto;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 0 4px;
         }
 
-        .mode-toggle {
-            display: flex;
-            gap: 18px;
-            margin: 8px 0 4px 0;
-            font-size: 15px;
+        .name-field {
+            margin-top: 12px;
         }
 
-        .mode-toggle label {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            cursor: pointer;
-        }
 
-        #overwrite-target {
-            margin: 8px 0;
-            font-size: 14px;
-            color: #ccc;
-        }
+
 
         .pick-row {
             cursor: pointer;
@@ -778,7 +768,8 @@
             min-width: 0;
         }
 
-        #new-folder-btn {
+        #new-folder-btn,
+        #save-new-folder-btn {
             min-width: 0;
         }
 
@@ -794,3 +785,5 @@
         .group-save-internal-btn {
             top: 72px;
         }
+
+

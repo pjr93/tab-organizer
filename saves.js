@@ -4,7 +4,7 @@
 //   { folders: ["Work", "Work/Research", ...],
 //     saves: [{ id, name, folder, at, windows }],
 //     lastSavedId }                 // save most recently created or overwritten
-// and "saveDialogMode": "new" | "overwrite" (last choice in the save dialog).
+// and "lastSaveAction": "new" | "overwrite" (what the last save did).
 // `folder` is a "/"-separated path; "" is the top level. `windows` uses the
 // same layout format as JSON files (serializeTabGroups in shared.js), so a
 // save can be exported and later loaded with Upload JSON.
@@ -54,14 +54,6 @@ function newSaveId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-// The save to suggest for "Overwrite": the one most recently saved or
-// overwritten, else the newest one.
-function defaultOverwriteTarget(store) {
-    return store.saves.find(s => s.id === store.lastSavedId)
-        || [...store.saves].sort((a, b) => (b.at || 0) - (a.at || 0))[0]
-        || null;
-}
-
 /* ---------------- folder helpers ---------------- */
 
 function parentFolder(path) {
@@ -99,15 +91,16 @@ async function getAutosaves() {
         .map(s => ({ id: s.dataKey, name: s.name, folder: AUTOSAVE_FOLDER, at: result[s.timeKey], windows: result[s.dataKey], readOnly: true }));
 }
 
-/* ---------------- saves browser (shared by Load and the Overwrite picker) ---------------- */
+/* ---------------- saves browser (shared by Load and Save dialogs) ---------------- */
 //
 // mode "manage": rows have Load / Add / Export JSON / Delete, folders can be
 //                created and deleted, autosaves are shown.
-// mode "pick":   clicking a save selects it (onPick); no actions, no
-//                autosaves (they can't be overwritten).
+// mode "pick":   file-dialog style: click a save to select it (onPick),
+//                double-click to choose it (onActivate); no autosaves
+//                (they can't be overwritten). onRender runs after each render.
 
-function createSavesBrowser({ listEl, pathEl, searchEl, newFolderBtn = null, mode, onPick = null }) {
-    const b = { folder: '', selectedId: null, listEl, pathEl, searchEl, newFolderBtn, mode, onPick };
+function createSavesBrowser({ listEl, pathEl, searchEl, newFolderBtn = null, mode, onPick = null, onActivate = null, onRender = null }) {
+    const b = { folder: '', selectedId: null, store: null, listEl, pathEl, searchEl, newFolderBtn, mode, onPick, onActivate, onRender };
     b.render = () => renderSavesBrowser(b);
     b.openAt = (folder) => { b.folder = folder; searchEl.value = ''; return b.render(); };
     searchEl.addEventListener('input', () => b.render());
@@ -197,13 +190,11 @@ function saveRow(b, save, { showFolder = false, matchNote = '' } = {}) {
 
     if (b.mode === 'pick') {
         row.classList.add('pick-row');
+        row.dataset.saveId = save.id;
         if (save.id === b.selectedId) row.classList.add('picked');
-        row.title = 'Overwrite this save';
-        row.addEventListener('click', () => {
-            b.selectedId = save.id;
-            if (b.onPick) b.onPick(save);
-            b.render();
-        });
+        row.title = 'Click to select, double-click to save over it';
+        row.addEventListener('click', () => { if (b.onPick) b.onPick(save); });
+        row.addEventListener('dblclick', () => { if (b.onActivate) b.onActivate(save); });
         return row;
     }
 
@@ -242,7 +233,13 @@ function emptyNote(list, text) {
 }
 
 async function renderSavesBrowser(b) {
+    await renderSavesBrowserInner(b);
+    if (b.onRender) b.onRender();
+}
+
+async function renderSavesBrowserInner(b) {
     const store = await readSavesStore();
+    b.store = store;
     const autosaves = b.mode === 'manage' ? await getAutosaves() : [];
     const list = b.listEl;
     const q = b.searchEl.value.trim().toLowerCase();
@@ -312,120 +309,119 @@ async function openLoadDialog() {
     loadBrowser.searchEl.focus();
 }
 
-/* ---------------- Save dialog (New / Overwrite) ---------------- */
+/* ---------------- Save dialog ("Save As" style) ---------------- */
+//
+// Works like an operating system's Save As dialog: browse to a folder (or
+// make a New folder there), type a name or click an existing save to reuse
+// its name, then Save. If the name already exists in that folder, the save
+// is replaced after confirming. Double-clicking a save saves over it.
+//
+// It opens in the folder you last saved to. If your last action replaced a
+// save, that save is pre-selected (so saving over it again is one step);
+// otherwise the default new name is filled in. ("lastSaveAction")
 
-const saveDialogState = { windows: null, mode: 'new', target: null };
+const saveDialogState = { windows: null, defaultName: '' };
 
 const pickBrowser = createSavesBrowser({
     listEl: document.getElementById('pick-list'),
     pathEl: document.getElementById('pick-path'),
     searchEl: document.getElementById('pick-search'),
+    newFolderBtn: document.getElementById('save-new-folder-btn'),
     mode: 'pick',
-    onPick: (save) => { saveDialogState.target = save; updateSaveDialog(); },
+    onPick: (save) => selectSaveInDialog(save),
+    onActivate: (save) => { selectSaveInDialog(save); submitSaveDialog(); },
+    onRender: () => updateSaveDialog(),
 });
 
-// Ask whether to create a new save (name + folder) or overwrite an existing
-// one, then store `windows`. The New/Overwrite choice is remembered.
+// Clicking a save: use its name (and, from search results, go to its folder).
+function selectSaveInDialog(save) {
+    document.getElementById('save-name').value = save.name;
+    if (pickBrowser.searchEl.value || pickBrowser.folder !== save.folder) {
+        pickBrowser.selectedId = save.id;
+        pickBrowser.openAt(save.folder); // re-renders, then updateSaveDialog
+    } else {
+        updateSaveDialog();
+    }
+}
+
+// The existing save (if any) in the current folder with the typed name.
+function saveMatchingName() {
+    const name = document.getElementById('save-name').value.trim();
+    const store = pickBrowser.store;
+    if (!name || !store) return null;
+    return store.saves.find(s => s.folder === pickBrowser.folder && s.name === name) || null;
+}
+
+function updateSaveDialog() {
+    const match = saveMatchingName();
+    pickBrowser.selectedId = match ? match.id : null;
+    for (const row of pickBrowser.listEl.querySelectorAll('.pick-row')) {
+        row.classList.toggle('picked', !!match && row.dataset.saveId === match.id);
+    }
+    const where = pickBrowser.folder ? `📁 ${pickBrowser.folder}` : 'the top level';
+    document.getElementById('save-location').textContent = match
+        ? `Saving in ${where}. "${match.name}" already exists here and will be replaced.`
+        : `Saving in ${where}.`;
+}
+
+// Open the dialog to store `windows` (whole session or one window).
 async function openSaveDialog(windows, defaultName) {
     if (!windows || !windows.length) {
         alert('Nothing to save.');
         return;
     }
     const store = await readSavesStore();
-    const { saveDialogMode } = await chrome.storage.local.get('saveDialogMode');
-    const dialog = document.getElementById('save-dialog');
+    const { lastSaveAction } = await chrome.storage.local.get('lastSaveAction');
+    const lastSaved = store.saves.find(s => s.id === store.lastSavedId) || null;
 
     saveDialogState.windows = windows;
-    saveDialogState.target = defaultOverwriteTarget(store);
-    saveDialogState.mode = saveDialogMode === 'overwrite' && saveDialogState.target ? 'overwrite' : 'new';
-
+    saveDialogState.defaultName = defaultName || '';
     document.getElementById('save-dialog-title').textContent =
         windows.length === 1 ? 'Save window internally' : 'Save session internally';
     document.getElementById('save-summary').textContent =
         `${windows.length} window${windows.length === 1 ? '' : 's'}, ${countTabs(windows)} tab(s)`;
 
-    // New: default name and folder list.
-    document.getElementById('save-name').value = defaultName || '';
-    const folderSelect = document.getElementById('save-folder');
-    folderSelect.replaceChildren();
-    for (const f of ['', ...[...store.folders].sort((a, c) => a.localeCompare(c))]) {
-        const opt = document.createElement('option');
-        opt.value = f;
-        const depth = f === '' ? 0 : f.split('/').length;
-        opt.textContent = '  '.repeat(depth) + (f === '' ? '/ (top level)' : '📁 ' + f.split('/').pop());
-        folderSelect.appendChild(opt);
-    }
-    folderSelect.value = store.folders.includes(lastSaveFolder) ? lastSaveFolder : '';
+    // Start where you last saved; pre-select the last save if you last replaced one.
+    const nameInput = document.getElementById('save-name');
+    nameInput.value = lastSaveAction === 'overwrite' && lastSaved ? lastSaved.name : saveDialogState.defaultName;
+    const startFolder = lastSaved ? lastSaved.folder : (store.folders.includes(lastSaveFolder) ? lastSaveFolder : '');
 
-    // Overwrite: picker opens at the default target's folder.
-    const overwriteRadio = document.getElementById('save-mode-overwrite');
-    overwriteRadio.disabled = !saveDialogState.target;
-    pickBrowser.selectedId = saveDialogState.target ? saveDialogState.target.id : null;
-    await pickBrowser.openAt(saveDialogState.target ? saveDialogState.target.folder : '');
-
-    document.getElementById(saveDialogState.mode === 'overwrite' ? 'save-mode-overwrite' : 'save-mode-new').checked = true;
-    updateSaveDialog();
+    const dialog = document.getElementById('save-dialog');
     dialog.showModal();
-    if (saveDialogState.mode === 'new') document.getElementById('save-name').select();
-}
-
-function updateSaveDialog() {
-    const overwrite = saveDialogState.mode === 'overwrite';
-    document.getElementById('save-new-fields').hidden = overwrite;
-    document.getElementById('save-overwrite-fields').hidden = !overwrite;
-    document.getElementById('save-name').required = !overwrite;
-    const target = saveDialogState.target;
-    const targetEl = document.getElementById('overwrite-target');
-    targetEl.replaceChildren();
-    if (target) {
-        const name = document.createElement('b');
-        name.textContent = target.name;
-        targetEl.append('Overwriting ', name, ` in 📁 ${folderDisplay(target.folder)} (saved ${describeSave(target)})`);
-    } else {
-        targetEl.textContent = 'Pick a save to overwrite.';
-    }
-    const submit = document.getElementById('save-submit');
-    submit.textContent = overwrite ? (target ? `Overwrite "${target.name}"` : 'Overwrite') : 'Save';
-    submit.disabled = overwrite && !target;
+    await pickBrowser.openAt(startFolder);
+    nameInput.focus();
+    nameInput.select();
 }
 
 async function submitSaveDialog() {
     const dialog = document.getElementById('save-dialog');
+    const nameInput = document.getElementById('save-name');
+    const name = nameInput.value.trim();
+    if (!name) {
+        nameInput.focus();
+        return;
+    }
+    const folder = pickBrowser.folder;
     const windows = saveDialogState.windows;
     const store = await readSavesStore();
-
-    if (saveDialogState.mode === 'overwrite') {
-        const target = saveDialogState.target && store.saves.find(s => s.id === saveDialogState.target.id);
-        if (!target) {
-            alert('That save no longer exists. Pick another one.');
-            return;
-        }
-        target.windows = windows;
-        target.at = Date.now();
-        store.lastSavedId = target.id;
+    const existing = store.saves.find(s => s.folder === folder && s.name === name);
+    let action;
+    if (existing) {
+        const where = folder ? `"${folder}"` : 'the top level';
+        if (!confirm(`"${name}" already exists in ${where}.\nDo you want to replace it?`)) return;
+        existing.windows = windows;
+        existing.at = Date.now();
+        store.lastSavedId = existing.id;
+        action = 'overwrite';
     } else {
-        const name = document.getElementById('save-name').value.trim();
-        const folder = document.getElementById('save-folder').value;
-        if (!name) {
-            document.getElementById('save-name').focus();
-            return;
-        }
-        const existing = store.saves.find(s => s.folder === folder && s.name === name);
-        if (existing) {
-            const where = folder ? `"${folder}"` : 'the top level';
-            if (!confirm(`A save named "${name}" already exists in ${where}. Replace it?`)) return;
-            existing.windows = windows;
-            existing.at = Date.now();
-            store.lastSavedId = existing.id;
-        } else {
-            const id = newSaveId();
-            store.saves.push({ id, name, folder, at: Date.now(), windows });
-            store.lastSavedId = id;
-        }
-        lastSaveFolder = folder;
+        const id = newSaveId();
+        store.saves.push({ id, name, folder, at: Date.now(), windows });
+        store.lastSavedId = id;
+        action = 'new';
     }
     await writeSavesStore(store);
-    await chrome.storage.local.set({ saveDialogMode: saveDialogState.mode });
+    await chrome.storage.local.set({ lastSaveAction: action });
+    lastSaveFolder = folder;
     saveDialogState.windows = null;
     dialog.close();
 }
@@ -473,21 +469,27 @@ async function deleteFolder(b, path) {
     b.render();
 }
 
-async function createFolder(b) {
-    if (b.folder === AUTOSAVE_FOLDER) return;
-    const raw = prompt(`New folder in ${b.folder ? `"${b.folder}"` : 'the top level'}:`);
-    if (raw == null) return;
+// Ask for a folder name and create it inside `parent`. Returns the new
+// folder's path, or null if cancelled / it already exists.
+async function addFolder(parent) {
+    const raw = prompt(`New folder in ${parent ? `"${parent}"` : 'the top level'}:`);
+    if (raw == null) return null;
     const name = raw.trim().replace(/\//g, '-');
-    if (!name) return;
-    const path = b.folder ? `${b.folder}/${name}` : name;
+    if (!name) return null;
+    const path = parent ? `${parent}/${name}` : name;
     const store = await readSavesStore();
     if (store.folders.includes(path)) {
         alert(`A folder named "${name}" already exists here.`);
-        return;
+        return null;
     }
     store.folders.push(path);
     await writeSavesStore(store);
-    b.render();
+    return path;
+}
+
+async function createFolder(b) {
+    if (b.folder === AUTOSAVE_FOLDER) return;
+    if (await addFolder(b.folder)) b.render();
 }
 
 /* ---------------- wiring ---------------- */
@@ -496,14 +498,7 @@ document.getElementById('save-form').addEventListener('submit', (e) => {
     e.preventDefault();
     submitSaveDialog();
 });
-for (const id of ['save-mode-new', 'save-mode-overwrite']) {
-    document.getElementById(id).addEventListener('change', (e) => {
-        if (!e.target.checked) return;
-        saveDialogState.mode = e.target.value;
-        updateSaveDialog();
-        if (saveDialogState.mode === 'new') document.getElementById('save-name').select();
-    });
-}
+document.getElementById('save-name').addEventListener('input', () => updateSaveDialog());
 // Enter in the picker's search box shouldn't submit the form.
 document.getElementById('pick-search').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') e.preventDefault();
