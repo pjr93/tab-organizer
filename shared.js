@@ -48,3 +48,36 @@ function serializeTabGroups(groups, titles) {
         };
     }).filter(Boolean);
 }
+
+// Tab screenshots for the full preview, kept in IndexedDB (shared by the board
+// and the service worker). Keyed by tab id; each record is
+// { url, blob, at } where `url` is the address the screenshot shows.
+const PreviewStore = (() => {
+    let dbPromise = null;
+    function open() {
+        if (!dbPromise) {
+            dbPromise = new Promise((resolve, reject) => {
+                const req = indexedDB.open('tab-previews', 1);
+                req.onupgradeneeded = () => req.result.createObjectStore('shots');
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+        return dbPromise;
+    }
+    async function run(mode, fn) {
+        const db = await open();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction('shots', mode);
+            const req = fn(tx.objectStore('shots'));
+            tx.oncomplete = () => resolve(req ? req.result : undefined);
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+    return {
+        get: (tabId) => run('readonly', s => s.get(tabId)),
+        put: (tabId, record) => run('readwrite', s => s.put(record, tabId)),
+        delete: (tabId) => run('readwrite', s => s.delete(tabId)),
+        clear: () => run('readwrite', s => s.clear()),
+    };
+})();

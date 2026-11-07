@@ -22,6 +22,7 @@ async function messageBoards(message) {
 /* ------------------------------------------------------------------ */
 
 async function openOrFocusBoard() {
+  await captureCurrentView(); // full preview: remember the tab we're leaving
   const tabs = await getBoardTabs();
   if (tabs.length > 0) {
     const tab = tabs[0];
@@ -203,6 +204,7 @@ function tabToItem(tab) {
 
 async function openSwitcher(step) {
   await ready;
+  await captureCurrentView(); // full preview: remember the tab we're leaving
   const origin = await chrome.windows.getLastFocused({ populate: true });
   const current = origin && origin.tabs ? origin.tabs.find(t => t.active) : null;
 
@@ -362,4 +364,217 @@ chrome.commands.onCommand.addListener((command) => {
   if (command === "prev_tab") onHistoryKey(1);       // older
   else if (command === "next_tab") onHistoryKey(-1); // newer
   else if (command === "home") openOrFocusBoard();
+});
+
+/* ------------------------------------------------------------------ */
+/* Full preview screenshots                                            */
+/* ------------------------------------------------------------------ */
+// When "full preview" is on (board checkbox), the visible tab is screenshotted
+// so the board can show how each tab looked when you last saw it:
+//   - shortly after a tab is shown or finishes loading,
+//   - right before leaving it via the tab switcher or the board hotkey/icon,
+//   - every 30 seconds for the tab you're looking at.
+// For a tab with no screenshot yet, the board asks for one ("preview_request"):
+// if it is the visible tab of its window we capture it directly, otherwise its
+// URL is loaded (muted, zoomed out) in a small temporary popup window placed
+// over the preview box, captured once loaded, and the window is closed.
+// Screenshots are shrunk and stored in IndexedDB (PreviewStore in shared.js).
+
+const PREVIEW_WIDTH = 600;          // stored width in px (shown at 300px)
+const CAPTURE_SPACING_MS = 600;     // captureVisibleTab allows ~2 calls/second
+const PREVIEW_LOAD_TIMEOUT_MS = 15000;
+const PREVIEW_ZOOM = 0.33;          // lay pages out ~900px wide in the 300px window
+
+async function previewEnabled() {
+  const { fullPreview } = await chrome.storage.local.get("fullPreview");
+  return !!fullPreview;
+}
+
+function canScreenshot(url) {
+  return typeof url === "string" && /^(https?|file|ftp):/.test(url);
+}
+
+// Serialize captureVisibleTab calls and keep them under the rate limit.
+let captureChain = Promise.resolve();
+let lastCaptureAt = 0;
+function queueCapture(fn) {
+  const run = captureChain.then(async () => {
+    const wait = lastCaptureAt + CAPTURE_SPACING_MS - Date.now();
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    try {
+      return await fn();
+    } finally {
+      lastCaptureAt = Date.now();
+    }
+  });
+  captureChain = run.catch(() => { });
+  return run;
+}
+
+async function shrinkScreenshot(dataUrl) {
+  const blob = await (await fetch(dataUrl)).blob();
+  const bitmap = await createImageBitmap(blob);
+  const scale = Math.min(1, PREVIEW_WIDTH / bitmap.width);
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+  const canvas = new OffscreenCanvas(w, h);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+  return canvas.convertToBlob({ type: "image/jpeg", quality: 0.75 });
+}
+
+// Screenshot the visible tab of `windowId` and store it for `storeAs.tabId`
+// (defaults to that visible tab). Throws if it can't be captured.
+async function captureVisible(windowId, storeAs) {
+  return queueCapture(async () => {
+    const [active] = await chrome.tabs.query({ active: true, windowId });
+    if (!active) throw new Error("No visible tab");
+    const target = storeAs || { tabId: active.id, url: active.url };
+    if (!storeAs && (!canScreenshot(active.url) || active.status !== "complete")) {
+      throw new Error("Tab can't be captured right now");
+    }
+    const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 80 });
+    const blob = await shrinkScreenshot(dataUrl);
+    await PreviewStore.put(target.tabId, { url: target.url, blob, at: Date.now() });
+  });
+}
+
+// Best-effort capture of what the user is looking at, before they move away.
+async function captureCurrentView(timeoutMs = 400) {
+  if (!(await previewEnabled())) return;
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    if (!win || win.state === "minimized") return;
+    await Promise.race([
+      captureVisible(win.id),
+      new Promise(r => setTimeout(r, timeoutMs)),
+    ]);
+  } catch (e) { /* nothing visible to capture */ }
+}
+
+// Capture a tab shortly after it's shown, once it has finished loading.
+const pendingShown = new Map(); // tabId -> timer
+function captureWhenShown(tabId, delay = 700) {
+  clearTimeout(pendingShown.get(tabId));
+  pendingShown.set(tabId, setTimeout(async () => {
+    pendingShown.delete(tabId);
+    if (!(await previewEnabled())) return;
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (!tab.active || tab.status !== "complete" || !canScreenshot(tab.url)) return;
+      if (!(await isNormalWindow(tab.windowId))) return;
+      await captureVisible(tab.windowId);
+    } catch (e) { /* tab gone or not capturable */ }
+  }, delay));
+}
+
+chrome.tabs.onActivated.addListener(({ tabId }) => captureWhenShown(tabId));
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "complete" && tab.active) captureWhenShown(tabId);
+});
+chrome.tabs.onRemoved.addListener((tabId) => { PreviewStore.delete(tabId).catch(() => { }); });
+// Tab ids start over in each browser session, so old screenshots are useless.
+chrome.runtime.onStartup.addListener(() => { PreviewStore.clear().catch(() => { }); });
+
+// Periodic refresh of the tab being looked at, only while the feature is on.
+async function syncPreviewAlarm() {
+  if (await previewEnabled()) {
+    chrome.alarms.create("preview-refresh", { periodInMinutes: 0.5 });
+  } else {
+    chrome.alarms.clear("preview-refresh");
+  }
+}
+syncPreviewAlarm();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.fullPreview) syncPreviewAlarm();
+});
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== "preview-refresh") return;
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    if (win && win.focused && win.state !== "minimized") await captureVisible(win.id);
+  } catch (e) { /* ignore */ }
+});
+
+function waitForTabComplete(tabId, timeoutMs) {
+  return new Promise(resolve => {
+    const done = () => {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    };
+    const listener = (id, changeInfo) => {
+      if (id === tabId && changeInfo.status === "complete") done();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.get(tabId).then(t => { if (t.status === "complete") done(); }).catch(done);
+  });
+}
+
+// Load `tab.url` in a temporary popup window, screenshot it, close it.
+async function captureViaTempWindow(tab, rect, returnWindowId) {
+  const win = await chrome.windows.create({
+    url: tab.url,
+    type: "popup",
+    focused: true,
+    width: 300,
+    height: 300,
+    left: Math.round(rect.left),
+    top: Math.round(rect.top),
+  });
+  const tempTabId = win.tabs[0].id;
+  try {
+    await chrome.tabs.update(tempTabId, { muted: true });
+    await waitForTabComplete(tempTabId, PREVIEW_LOAD_TIMEOUT_MS);
+    try {
+      // Per-tab zoom so the site's normal zoom level isn't changed.
+      await chrome.tabs.setZoomSettings(tempTabId, { mode: "automatic", scope: "per-tab" });
+      await chrome.tabs.setZoom(tempTabId, PREVIEW_ZOOM);
+    } catch (e) { /* some pages can't be zoomed; capture as is */ }
+    await new Promise(r => setTimeout(r, 800)); // let it repaint
+    await captureVisible(win.id, { tabId: tab.id, url: tab.url });
+  } finally {
+    await chrome.windows.remove(win.id).catch(() => { });
+    if (returnWindowId != null) chrome.windows.update(returnWindowId, { focused: true }).catch(() => { });
+  }
+}
+
+// One temporary window at a time; repeated requests for a tab share one job.
+const previewJobs = new Map(); // tabId -> Promise
+let tempWindowChain = Promise.resolve();
+
+async function handlePreviewRequest(tabId, rect, returnWindowId) {
+  const tab = await chrome.tabs.get(tabId);
+  if (!canScreenshot(tab.url)) {
+    throw new Error("This kind of page can't be previewed.");
+  }
+  // Visible tab of a window that isn't minimized: capture it directly.
+  if (tab.active && !tab.discarded) {
+    try {
+      const win = await chrome.windows.get(tab.windowId);
+      if (win.state !== "minimized") {
+        await captureVisible(tab.windowId);
+        return;
+      }
+    } catch (e) { /* fall back to loading it */ }
+  }
+  const job = tempWindowChain.then(() => captureViaTempWindow(tab, rect, returnWindowId));
+  tempWindowChain = job.catch(() => { });
+  return job;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || message.type !== "preview_request") return;
+  const { tabId, rect } = message;
+  if (!previewJobs.has(tabId)) {
+    const returnWindowId = sender.tab ? sender.tab.windowId : null;
+    const job = handlePreviewRequest(tabId, rect || { left: 100, top: 100 }, returnWindowId)
+      .finally(() => previewJobs.delete(tabId));
+    previewJobs.set(tabId, job);
+  }
+  previewJobs.get(tabId)
+    .then(() => sendResponse({ ok: true }))
+    .catch(e => sendResponse({ ok: false, reason: e && e.message ? e.message : String(e) }));
+  return true; // respond asynchronously
 });
