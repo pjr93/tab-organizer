@@ -127,15 +127,15 @@ chrome.runtime.onMessage.addListener((message) => {
 /* Tab history (most-recently-used order) and the tab switcher         */
 /* ------------------------------------------------------------------ */
 //
-// `mru` holds tab ids, most recent first. The board tab and tabs in popup
-// windows are never included. It lives in chrome.storage.session so it
+// `mru` holds tab ids, most recent first. The board is included; the
+// extension's other pages (switcher window) and tabs in popup windows are not. It lives in chrome.storage.session so it
 // survives the service worker being suspended and doesn't need the board.
 //
-// Alt+Shift+Left/Right opens the switcher listing recent tabs (see below for
-// overlay vs. window). While it is open it captures the keyboard. Further
-// presses move the highlight (Left = older, Right = newer); releasing Alt
-// switches to the highlighted tab, Esc cancels. Only the committed tab moves
-// to the front of the list.
+// Alt+Shift+Arrow opens the switcher listing recent tabs (see below for
+// overlay vs. window). Left/Right are browser shortcuts; Up/Down are caught by
+// the overlay script in the page. While open it captures the keyboard: arrows
+// move the highlight (Left/Down = older, Right/Up = newer), Enter switches,
+// Esc cancels. Only the tab switched to moves to the front of the list.
 
 const MRU_LIMIT = 200;
 const SWITCHER_MAX_ITEMS = 15;
@@ -152,7 +152,7 @@ const ready = (async () => {
   // First run in this browser session: seed from each tab's last access time.
   const tabs = await chrome.tabs.query({ windowType: "normal" });
   mru = tabs
-    .filter(t => !isBoardUrl(t.url))
+    .filter(t => isBoardUrl(t.url) || !isOwnPage(t.url))
     .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))
     .map(t => t.id)
     .slice(0, MRU_LIMIT);
@@ -184,7 +184,7 @@ async function isNormalWindow(windowId) {
 async function recordActivation(tab) {
   await ready;
   if (switcher) return; // the switcher commits its own choice
-  if (isBoardUrl(tab.url) || isOwnPage(tab.url)) return;
+  if (isOwnPage(tab.url) && !isBoardUrl(tab.url)) return;
   if (!(await isNormalWindow(tab.windowId))) return;
   moveToFront(tab.id);
 }
@@ -201,12 +201,53 @@ async function recordActivation(tab) {
 // switcher = { mode: "overlay" | "window", items, cursor, originWindowId,
 //              overlayTabId (overlay), windowId + pageTabId (window) }
 
+// Icons for the switcher. The overlay runs inside a web page, which can't load
+// chrome://, extension or favicon-service images, so icons are fetched here
+// and passed along as data: URLs. Cached by page URL.
+const iconCache = new Map(); // url -> data URL
+const ICON_CACHE_LIMIT = 300;
+
+async function blobToDataUrl(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return `data:${blob.type || "image/png"};base64,${btoa(binary)}`;
+}
+
+async function loadIcon(url) {
+  if (iconCache.has(url)) return iconCache.get(url);
+  // The board uses the extension's own icon; everything else comes from the
+  // browser's favicon service (also covers chrome:// pages).
+  const src = isBoardUrl(url) ? chrome.runtime.getURL("icon32.png") : getFaviconUrl(url, 32);
+  const dataUrl = await blobToDataUrl(await (await fetch(src)).blob());
+  if (iconCache.size >= ICON_CACHE_LIMIT) iconCache.delete(iconCache.keys().next().value);
+  iconCache.set(url, dataUrl);
+  return dataUrl;
+}
+
+// Fetch icons the cache doesn't have yet and send them to the open switcher.
+async function fillMissingIcons(s) {
+  const missing = s.items.filter(item => !item.icon && item.url);
+  if (!missing.length) return;
+  const icons = {};
+  await Promise.all(missing.map(async item => {
+    try { icons[item.id] = item.icon = await loadIcon(item.url); } catch (e) { /* no icon */ }
+  }));
+  if (switcher !== s || !Object.keys(icons).length) return;
+  const { tabId, frameId } = switcherTabTarget(s);
+  if (tabId == null) return;
+  const opts = frameId != null ? { frameId } : undefined;
+  chrome.tabs.sendMessage(tabId, { type: "switcher_icons", icons }, opts).catch(() => { });
+}
+
 function tabToItem(tab) {
   return {
     id: tab.id,
     title: tab.title || tab.url || "Untitled",
     url: tab.url || "",
-    favIconUrl: tab.favIconUrl || "",
+    icon: iconCache.get(tab.url) || "",
     windowId: tab.windowId,
     discarded: !!tab.discarded,
     audible: !!tab.audible,
@@ -275,7 +316,10 @@ async function openSwitcher(step) {
   // 1) Overlay in the current page.
   if (current && origin && origin.type === "normal") {
     switcher = { mode: "overlay", overlayTabId: current.id, items, cursor, originWindowId };
-    if (await showOverlay(current.id, items, cursor)) return;
+    if (await showOverlay(current.id, items, cursor)) {
+      fillMissingIcons(switcher);
+      return;
+    }
   }
 
   // 2) Popup window.
@@ -288,6 +332,8 @@ async function openSwitcher(step) {
     }
     switcher.windowId = win.id;
     switcher.pageTabId = win.tabs && win.tabs[0] ? win.tabs[0].id : null;
+    // The page may not be listening yet; it also gets icons via switcher_ready.
+    fillMissingIcons(switcher);
   } catch (e) {
     console.warn("Could not open the tab switcher", e);
     switcher = null;
@@ -360,6 +406,12 @@ function isFromCurrentSwitcher(sender) {
 // Messages from the overlay and from switcher.html
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string" || !message.type.startsWith("switcher_")) return;
+  if (message.type === "switcher_open_request") {
+    // Alt+Shift+Up/Down caught by the overlay script in a page (Chrome allows
+    // only 4 suggested extension shortcuts, so these aren't browser commands).
+    if (sender.tab) onHistoryKey(message.step === 1 ? 1 : -1);
+    return;
+  }
   if (message.type === "switcher_ready") {
     sendResponse(switcher && switcher.mode === "window" ? { items: switcher.items, cursor: switcher.cursor } : null);
     return;

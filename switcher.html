@@ -8,10 +8,15 @@
         html, body {
             margin: 0;
             height: 100%;
+            box-sizing: border-box;
             background: #111111;
             color: white;
             font-family: sans-serif;
             overflow: hidden;
+        }
+
+        body {
+            border: 2px solid green;
         }
 
         #banner {
@@ -19,7 +24,7 @@
             align-items: center;
             gap: 10px;
             padding: 10px 14px;
-            background: #2196F3;
+            background: green; /* same as the board's tile */
             color: white;
             font-weight: bold;
             font-size: 15px;
@@ -96,7 +101,7 @@
 
 <body>
     <div id="banner"><span class="dot"></span>Tab switcher: keyboard input is captured</div>
-    <div id="hint">Release Alt to switch · Alt+Shift+← older / → newer (or ↑ ↓) · Enter to switch · Esc to cancel · click to pick</div>
+    <div id="hint">Arrow keys to move · Enter to switch · Esc to cancel · click to pick</div>
     <ul id="list"></ul>
     <script src="shared.js"></script>
     <script src="switcher.js"></script>

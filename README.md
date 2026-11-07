@@ -45,18 +45,18 @@ You can always navigate back to it by clicking the icon on the toolbar at the to
 
 ### Tab switcher
 
-`Alt+Shift+Left` / `Alt+Shift+Right` opens the tab switcher, a list of your recently used tabs (most recent at the top), like Alt+Tab. It works on any page, whether or not the board is open.
+`Alt+Shift` + any arrow key opens the tab switcher, a list of your recently used tabs (most recent at the top, the Reflection Board included), like Alt+Tab. It works on any page, whether or not the board is open.
 
-- A quick tap of `Alt+Shift+Left` jumps straight back to your previous tab.
-- Hold Alt to keep the list open. It appears on top of the page you're on with a blue banner reading "keyboard input is captured": while it's up, your keys and clicks go to the switcher, not the page.
-- Keep holding Alt and press Left (older) / Right (newer), or use the arrow keys, to move the highlight.
-- **Release Alt** (or press Enter) to switch to the highlighted tab. Esc or clicking outside the list cancels. You can also click a row.
+- `Alt+Shift+Left` / `Alt+Shift+Down` opens it on the previous tab; `Alt+Shift+Right` / `Alt+Shift+Up` on the current one.
+- It appears on top of the page you're on, with a green banner reading "keyboard input is captured": while it's up, your keys and clicks go to the switcher, not the page.
+- Use the arrow keys to move the highlight (Left/Down = older, Right/Up = newer). You can let go of Alt+Shift.
+- Press **Enter** to switch to the highlighted tab, or click a row. Esc or clicking outside the list cancels.
 - Only the tab you actually switch to moves to the front of the list.
-- On pages extensions aren't allowed to draw on (chrome:// pages, the web store, the new tab page, PDFs), or while you're typing in the address bar, the list opens in a small separate window instead and behaves the same way.
+- On pages extensions aren't allowed to draw on (chrome:// pages, the web store, the new tab page, PDFs), or while you're typing in the address bar, the list opens in a small separate window instead and works the same way. (There, only Alt+Shift+Left/Right open it.)
 
 "view history in app" checkbox: when checked, switching activates the tab inside its window but keeps you where you were (e.g. on the board, so you can watch the highlight move). When unchecked, the tab's window comes to the front.
 
-Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing keyboard language. If you have more than one input language and it gets in the way, change the extension's shortcuts at `chrome://extensions/shortcuts` (or your browser's equivalent).
+Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing keyboard language. If you have more than one input language and it gets in the way, change the extension's shortcuts at `chrome://extensions/shortcuts` (or your browser's equivalent). Alt+Shift+Up/Down are handled inside pages rather than as browser shortcuts (Chrome allows an extension only four suggested shortcuts), so they can't be changed there.
 
 ## Tab icons and previews
 
