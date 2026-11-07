@@ -45,12 +45,14 @@ You can always navigate back to it by clicking the icon on the toolbar at the to
 
 ### Tab switcher
 
-`Alt+Shift+Left` / `Alt+Shift+Right` opens the tab switcher, a small window listing your recently used tabs (most recent at the top), like Alt+Tab. It works on any page, whether or not the board is open.
+`Alt+Shift+Left` / `Alt+Shift+Right` opens the tab switcher, a list of your recently used tabs (most recent at the top), like Alt+Tab. It works on any page, whether or not the board is open.
 
-- While it's open, a blue banner reads "keyboard input is captured": your keys go to the switcher, not to the page.
+- A quick tap of `Alt+Shift+Left` jumps straight back to your previous tab.
+- Hold Alt to keep the list open. It appears on top of the page you're on with a blue banner reading "keyboard input is captured": while it's up, your keys and clicks go to the switcher, not the page.
 - Keep holding Alt and press Left (older) / Right (newer), or use the arrow keys, to move the highlight.
-- **Release Alt** (or press Enter) to switch to the highlighted tab. Esc or clicking outside cancels. You can also click a row.
+- **Release Alt** (or press Enter) to switch to the highlighted tab. Esc or clicking outside the list cancels. You can also click a row.
 - Only the tab you actually switch to moves to the front of the list.
+- On pages extensions aren't allowed to draw on (chrome:// pages, the web store, the new tab page, PDFs), or while you're typing in the address bar, the list opens in a small separate window instead and behaves the same way.
 
 "view history in app" checkbox: when checked, switching activates the tab inside its window but keeps you where you were (e.g. on the board, so you can watch the highlight move). When unchecked, the tab's window comes to the front.
 
@@ -60,7 +62,7 @@ Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing key
 
 A 🔊 next to a tab means it's playing sound and 🔇 means it's muted. Click the icon to mute or unmute without leaving the board.
 
-"full preview" checkbox: hovering a tab shows a 300×300 screenshot of it, labelled with when it was taken. Screenshots are taken shortly after you view a tab, right before you leave it with the switcher or the board button/hotkey, and every 30 seconds for the tab you're looking at, so they show the tab roughly as you left it (e.g. a paused video). A tab is never loaded just to preview it, so a tab you haven't viewed since turning this on (e.g. one restored unloaded) shows no picture until you visit it. Browser-internal pages (chrome://, the web store) can't be previewed. This feature is why the extension asks for access to all websites; screenshots stay on your computer.
+"full preview" checkbox: hovering a tab shows a 300×300 screenshot of it, labelled with when it was taken. Screenshots are taken shortly after you view a tab, right before you leave it with the switcher or the board button/hotkey, and every 30 seconds for the tab you're looking at, so they show the tab roughly as you left it (e.g. a paused video). A tab is never loaded just to preview it, so a tab you haven't viewed since turning this on (e.g. one restored unloaded) shows no picture until you visit it. Browser-internal pages (chrome://, the web store) can't be previewed. The extension asks for access to all websites for this feature and for drawing the tab switcher over pages; screenshots stay on your computer.
 
 ## Creating tabs and windows
 

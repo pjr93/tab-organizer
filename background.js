@@ -131,17 +131,17 @@ chrome.runtime.onMessage.addListener((message) => {
 // windows are never included. It lives in chrome.storage.session so it
 // survives the service worker being suspended and doesn't need the board.
 //
-// Alt+Shift+Left/Right opens the switcher (switcher.html) in a small popup
-// window listing recent tabs. While it is open it has keyboard focus, so key
-// presses go to it rather than the page. Further presses move the highlight
-// (Left = older, Right = newer); releasing Alt switches to the highlighted
-// tab, Esc cancels. Only the committed tab moves to the front of the list.
+// Alt+Shift+Left/Right opens the switcher listing recent tabs (see below for
+// overlay vs. window). While it is open it captures the keyboard. Further
+// presses move the highlight (Left = older, Right = newer); releasing Alt
+// switches to the highlighted tab, Esc cancels. Only the committed tab moves
+// to the front of the list.
 
 const MRU_LIMIT = 200;
 const SWITCHER_MAX_ITEMS = 15;
 
 let mru = [];
-let switcher = null; // { windowId, pageTabId, items, cursor, originWindowId }
+let switcher = null; // see "the switcher" below
 
 const ready = (async () => {
   const { mru: saved } = await chrome.storage.session.get("mru");
@@ -189,17 +189,63 @@ async function recordActivation(tab) {
   moveToFront(tab.id);
 }
 
-/* ---- switcher window ---- */
+/* ---- the switcher ---- */
+//
+// Preferred: an overlay drawn inside the current page by switcher-overlay.js
+// (content script; also loaded by the board). Keyboard focus stays in the page,
+// so the overlay sees Alt being released even on a quick tap.
+// Fallback: switcher.html in a small popup window, for pages extensions can't
+// script (chrome://, web store, new tab page, PDF viewer) or when the page
+// doesn't have keyboard focus (e.g. typing in the address bar).
+//
+// switcher = { mode: "overlay" | "window", items, cursor, originWindowId,
+//              overlayTabId (overlay), windowId + pageTabId (window) }
 
 function tabToItem(tab) {
   return {
     id: tab.id,
     title: tab.title || tab.url || "Untitled",
     url: tab.url || "",
+    favIconUrl: tab.favIconUrl || "",
     windowId: tab.windowId,
     discarded: !!tab.discarded,
     audible: !!tab.audible,
   };
+}
+
+// Ask the page to show the overlay. Injects the script if the tab was opened
+// before the extension loaded. Resolves true if the overlay is up.
+async function showOverlay(tabId, items, cursor) {
+  const message = { type: "overlay_show", items, cursor };
+  const trySend = () => chrome.tabs.sendMessage(tabId, message, { frameId: 0 });
+  let response;
+  try {
+    response = await trySend();
+  } catch (e) {
+    try {
+      await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["switcher-overlay.js"] });
+      response = await trySend();
+    } catch (e2) {
+      return false; // page can't be scripted
+    }
+  }
+  return !!(response && response.ok);
+}
+
+async function openSwitcherWindow(origin, items, cursor) {
+  const width = 520;
+  const rows = Math.min(items.length, 10);
+  const height = 150 + rows * 42;
+  const base = origin && origin.width ? origin : { left: 0, top: 0, width: 1280, height: 800 };
+  const left = Math.round(base.left + (base.width - width) / 2);
+  const top = Math.round(base.top + Math.max(40, (base.height - height) / 3));
+  const win = await chrome.windows.create({
+    url: chrome.runtime.getURL("switcher.html"),
+    type: "popup",
+    focused: true,
+    width, height, left, top,
+  });
+  return win;
 }
 
 async function openSwitcher(step) {
@@ -208,38 +254,34 @@ async function openSwitcher(step) {
   const origin = await chrome.windows.getLastFocused({ populate: true });
   const current = origin && origin.tabs ? origin.tabs.find(t => t.active) : null;
 
-  // Collect the most recent tabs that still exist.
+  // Collect the most recent tabs that still exist (one query, not one per tab).
+  const allTabs = new Map((await chrome.tabs.query({})).map(t => [t.id, t]));
   const items = [];
-  for (const id of [...mru]) {
-    if (items.length >= SWITCHER_MAX_ITEMS) break;
-    try {
-      items.push(tabToItem(await chrome.tabs.get(id)));
-    } catch (e) {
-      mru.splice(mru.indexOf(id), 1);
-    }
+  const alive = [];
+  for (const id of mru) {
+    const tab = allTabs.get(id);
+    if (!tab) continue;
+    alive.push(id);
+    if (items.length < SWITCHER_MAX_ITEMS) items.push(tabToItem(tab));
   }
-  persistMru();
+  if (alive.length !== mru.length) { mru = alive; persistMru(); }
   if (!items.length) return;
 
   // If the current tab heads the list, the first step should skip it.
   const start = current && items[0].id === current.id ? 0 : -1;
   const cursor = Math.max(0, Math.min(items.length - 1, start + step));
+  const originWindowId = origin ? origin.id : null;
 
-  const width = 520;
-  const rows = Math.min(items.length, 10);
-  const height = 150 + rows * 42;
-  const base = origin && origin.width ? origin : { left: 0, top: 0, width: 1280, height: 800 };
-  const left = Math.round(base.left + (base.width - width) / 2);
-  const top = Math.round(base.top + Math.max(40, (base.height - height) / 3));
+  // 1) Overlay in the current page.
+  if (current && origin && origin.type === "normal") {
+    switcher = { mode: "overlay", overlayTabId: current.id, items, cursor, originWindowId };
+    if (await showOverlay(current.id, items, cursor)) return;
+  }
 
-  switcher = { windowId: null, pageTabId: null, items, cursor, originWindowId: origin ? origin.id : null };
+  // 2) Popup window.
+  switcher = { mode: "window", windowId: null, pageTabId: null, items, cursor, originWindowId };
   try {
-    const win = await chrome.windows.create({
-      url: chrome.runtime.getURL("switcher.html"),
-      type: "popup",
-      focused: true,
-      width, height, left, top,
-    });
+    const win = await openSwitcherWindow(origin, items, cursor);
     if (!switcher) { // cancelled while the window was opening
       chrome.windows.remove(win.id).catch(() => { });
       return;
@@ -252,16 +294,27 @@ async function openSwitcher(step) {
   }
 }
 
+function switcherTabTarget(s) {
+  return s.mode === "overlay" ? { tabId: s.overlayTabId, frameId: 0 } : { tabId: s.pageTabId, frameId: undefined };
+}
+
 function moveSwitcher(step) {
   if (!switcher) return;
   switcher.cursor = Math.max(0, Math.min(switcher.items.length - 1, switcher.cursor + step));
-  if (switcher.pageTabId != null) {
-    chrome.tabs.sendMessage(switcher.pageTabId, { type: "switcher_update", cursor: switcher.cursor }).catch(() => { });
+  const { tabId, frameId } = switcherTabTarget(switcher);
+  if (tabId != null) {
+    const opts = frameId != null ? { frameId } : undefined;
+    chrome.tabs.sendMessage(tabId, { type: "switcher_update", cursor: switcher.cursor }, opts).catch(() => { });
   }
 }
 
-async function closeSwitcherWindow(s) {
-  if (s.windowId != null) await chrome.windows.remove(s.windowId).catch(() => { });
+// Remove the switcher UI (overlay or window).
+async function closeSwitcherUI(s) {
+  if (s.mode === "overlay") {
+    chrome.tabs.sendMessage(s.overlayTabId, { type: "overlay_hide" }, { frameId: 0 }).catch(() => { });
+  } else if (s.windowId != null) {
+    await chrome.windows.remove(s.windowId).catch(() => { });
+  }
 }
 
 async function commitSwitcher(index) {
@@ -269,7 +322,7 @@ async function commitSwitcher(index) {
   if (!s) return;
   switcher = null;
   const target = s.items[Number.isInteger(index) ? index : s.cursor];
-  await closeSwitcherWindow(s);
+  await closeSwitcherUI(s);
   if (!target) return;
   try {
     const tab = await chrome.tabs.update(target.id, { active: true });
@@ -277,7 +330,7 @@ async function commitSwitcher(index) {
     if (historyStayInApp && s.originWindowId != null) {
       // "view history in app": switch the tab but keep focus where it was.
       await chrome.windows.update(s.originWindowId, { focused: true });
-    } else {
+    } else if (tab.windowId !== s.originWindowId || s.mode === "window") {
       await chrome.windows.update(tab.windowId, { focused: true });
     }
     moveToFront(target.id);
@@ -292,26 +345,47 @@ async function cancelSwitcher() {
   const s = switcher;
   if (!s) return;
   switcher = null;
-  await closeSwitcherWindow(s);
-  if (s.originWindowId != null) chrome.windows.update(s.originWindowId, { focused: true }).catch(() => { });
+  await closeSwitcherUI(s);
+  if (s.mode === "window" && s.originWindowId != null) {
+    chrome.windows.update(s.originWindowId, { focused: true }).catch(() => { });
+  }
 }
 
-// Messages from switcher.html
+function isFromCurrentSwitcher(sender) {
+  if (!switcher || !sender.tab) return false;
+  if (switcher.mode === "overlay") return sender.tab.id === switcher.overlayTabId && sender.frameId === 0;
+  return sender.tab.windowId === switcher.windowId;
+}
+
+// Messages from the overlay and from switcher.html
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== "string" || !message.type.startsWith("switcher_")) return;
   if (message.type === "switcher_ready") {
-    sendResponse(switcher ? { items: switcher.items, cursor: switcher.cursor } : null);
+    sendResponse(switcher && switcher.mode === "window" ? { items: switcher.items, cursor: switcher.cursor } : null);
     return;
   }
-  // Ignore stale pages (e.g. a switcher window left over from a previous one).
-  if (!switcher || !sender.tab || sender.tab.windowId !== switcher.windowId) return;
-  if (message.type === "switcher_move") queueSwitcher(() => moveSwitcher(message.step));
-  else if (message.type === "switcher_commit") queueSwitcher(() => commitSwitcher(message.index));
-  else if (message.type === "switcher_cancel") queueSwitcher(() => cancelSwitcher());
+  // Messages are queued, so one sent while the switcher is still opening is
+  // checked once opening has finished.
+  queueSwitcher(() => {
+    if (!isFromCurrentSwitcher(sender)) return; // stale overlay/window
+    if (message.type === "switcher_move") return moveSwitcher(message.step);
+    if (message.type === "switcher_commit") return commitSwitcher(message.index);
+    if (message.type === "switcher_cancel") return cancelSwitcher();
+  });
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
-  if (switcher && switcher.windowId === windowId) switcher = null; // closed by the user
+  if (switcher && switcher.mode === "window" && switcher.windowId === windowId) switcher = null; // closed by the user
+});
+
+// The page showing the overlay was closed or navigated away.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (switcher && switcher.mode === "overlay" && switcher.overlayTabId === tabId) switcher = null;
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading" && switcher && switcher.mode === "overlay" && switcher.overlayTabId === tabId) {
+    switcher = null;
+  }
 });
 
 /* ---- tracking activations ---- */
