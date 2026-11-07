@@ -37,16 +37,30 @@
         <form id="save-form">
             <h3 id="save-dialog-title">Save session internally</h3>
             <p id="save-summary" class="load-slot-meta"></p>
-            <label class="field">Name
-                <input id="save-name" type="text" autocomplete="off" required>
-            </label>
-            <label class="field">Folder
-                <select id="save-folder"></select>
-            </label>
-            <p class="load-slot-meta">Create folders from Load (Internal).</p>
+            <div class="mode-toggle" role="radiogroup">
+                <label><input type="radio" name="save-mode" id="save-mode-new" value="new"> New</label>
+                <label><input type="radio" name="save-mode" id="save-mode-overwrite" value="overwrite"> Overwrite</label>
+            </div>
+            <div id="save-new-fields">
+                <label class="field">Name
+                    <input id="save-name" type="text" autocomplete="off">
+                </label>
+                <label class="field">Folder
+                    <select id="save-folder"></select>
+                </label>
+                <p class="load-slot-meta">Create folders from Load (Internal).</p>
+            </div>
+            <div id="save-overwrite-fields" hidden>
+                <p id="overwrite-target"></p>
+                <div class="saves-toolbar">
+                    <input id="pick-search" type="search" placeholder="Search saves, tab titles and URLs…" autocomplete="off">
+                </div>
+                <div id="pick-path"></div>
+                <div id="pick-list"></div>
+            </div>
             <div class="load-dialog-actions">
                 <button type="button" id="save-dialog-cancel" class="state-btn">Cancel</button>
-                <button type="submit" class="state-btn primary-btn">Save</button>
+                <button type="submit" id="save-submit" class="state-btn primary-btn">Save</button>
             </div>
         </form>
     </dialog>

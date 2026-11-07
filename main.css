@@ -623,7 +623,8 @@
         }
 
         /* Internal saves: save dialog + saves browser */
-        #load-dialog {
+        #load-dialog,
+        #save-dialog {
             width: 640px;
         }
 
@@ -653,17 +654,29 @@
             margin: 8px 0;
         }
 
-        #saves-search {
+        #saves-search,
+        #pick-search {
             flex: 1 1 auto;
         }
 
-        #saves-path {
+        #pick-search {
+            background: #111;
+            color: white;
+            border: 1px solid #666;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 15px;
+        }
+
+        #saves-path,
+        #pick-path {
             font-size: 14px;
             color: #aaa;
             margin: 4px 0 8px 0;
         }
 
-        #saves-path .crumb {
+        #saves-path .crumb,
+        #pick-path .crumb {
             background: none;
             border: none;
             color: #8ab4f8;
@@ -672,7 +685,8 @@
             padding: 0 2px;
         }
 
-        #saves-path .crumb:disabled {
+        #saves-path .crumb:disabled,
+        #pick-path .crumb:disabled {
             color: white;
             cursor: default;
         }
@@ -680,6 +694,47 @@
         #saves-list {
             max-height: 55vh;
             overflow-y: auto;
+        }
+
+        #pick-list {
+            max-height: 40vh;
+            overflow-y: auto;
+        }
+
+        .mode-toggle {
+            display: flex;
+            gap: 18px;
+            margin: 8px 0 4px 0;
+            font-size: 15px;
+        }
+
+        .mode-toggle label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+        }
+
+        #overwrite-target {
+            margin: 8px 0;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .pick-row {
+            cursor: pointer;
+            border-radius: 6px;
+            padding-left: 6px;
+            padding-right: 6px;
+        }
+
+        .pick-row:hover {
+            background: #ffffff0d;
+        }
+
+        .pick-row.picked {
+            outline: 2px solid green;
+            background: #00800022;
         }
 
         .folder-row {

@@ -88,7 +88,9 @@ If you drag a tab outside of all the boxes, it will open that tab in a new windo
 
 There are two kinds of save states: **internal** and **JSON file**. Both save every window, its tabs and its title.
 
-- **Save (Internal)** / `Ctrl+S`: asks for a name and a folder, then saves the whole session in the browser's extension storage. You can keep as many named saves as you like; saving with a name that already exists in that folder asks before replacing it.
+- **Save (Internal)** / `Ctrl+S`: saves the whole session in the browser's extension storage. The dialog has two options, and it remembers which one you used last:
+  - **New**: give it a name (a dated default is filled in) and pick a folder. Saving with a name that already exists in that folder asks before replacing it.
+  - **Overwrite**: replaces an existing save. It starts on the save you most recently created or overwrote; to choose another, browse folders or search in the picker below and click the save you want.
 - **Save window internally** (the disk icon on each window box, under the download icon): saves just that window the same way, as a one-window session.
 - **autosave** checkbox: saves your session automatically about 10 seconds after tabs or windows change, into its own slot (it never touches your named saves). When the browser starts, the last autosave is kept as "Autosave from previous browser session", so a fresh empty session can't overwrite it.
 - **Load (Internal)**: browse your internal saves.
