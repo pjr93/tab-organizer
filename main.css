@@ -796,4 +796,10 @@
             top: 72px;
         }
 
+        /* Dark purple, same darkness as the other buttons' hover colours
+           (#13589c blue, #9c6813 orange) */
+        .group-save-internal-btn:hover {
+            background: #6b139c;
+        }
+
 
