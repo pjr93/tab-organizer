@@ -160,13 +160,11 @@
             object-position: top center;
         }
 
-        .preview-shot-msg {
-            align-self: center;
-            color: #aaa;
-            font-size: 14px;
-            padding: 12px;
-            text-align: center;
-            white-space: normal;
+        .preview-none {
+            margin-top: 6px;
+            color: #888;
+            font-size: 13px;
+            font-style: italic;
         }
 
         .preview-shot-age {

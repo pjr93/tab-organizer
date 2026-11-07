@@ -50,15 +50,13 @@ function showTabPreview(tab, anchorEl) {
     preview.append(header, urlEl);
 
     const token = ++previewToken;
-    let shotBox = null;
-    if (fullPreviewEnabled && !isBoardTab(tab)) {
-        shotBox = document.createElement('div');
-        shotBox.id = 'preview-shot';
-        preview.appendChild(shotBox);
-    }
-
-    // Place below the tile, or above it if there isn't room; keep it on screen.
     preview.style.display = "block";
+    positionPreview(preview, anchorEl);
+    if (fullPreviewEnabled && !isBoardTab(tab)) fillPreviewShot(tab, preview, anchorEl, token);
+}
+
+// Place below the tile, or above it if there isn't room; keep it on screen.
+function positionPreview(preview, anchorEl) {
     const rect = anchorEl.getBoundingClientRect();
     const box = preview.getBoundingClientRect();
     let top = rect.bottom + 6;
@@ -68,77 +66,40 @@ function showTabPreview(tab, anchorEl) {
     const left = Math.max(4, Math.min(rect.left, window.innerWidth - box.width - 4));
     preview.style.top = top + "px";
     preview.style.left = left + "px";
-
-    if (shotBox) fillPreviewShot(tab, shotBox, token);
 }
 
 let previewToken = 0;      // bumps on every show/hide so stale async work is ignored
 let previewObjectUrl = null;
 let fullPreviewEnabled = false;
-const PREVIEW_DWELL_MS = 500;
 
-function setShotMessage(shotBox, text) {
-    shotBox.replaceChildren();
-    const msg = document.createElement('div');
-    msg.className = 'preview-shot-msg';
-    msg.textContent = text;
-    shotBox.appendChild(msg);
-}
-
-function showShot(shotBox, record) {
-    if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
-    previewObjectUrl = URL.createObjectURL(record.blob);
-    const img = document.createElement('img');
-    img.src = previewObjectUrl;
-    img.alt = 'Tab preview';
-    const age = document.createElement('div');
-    age.className = 'preview-shot-age';
-    age.textContent = 'as of ' + new Date(record.at).toLocaleTimeString();
-    shotBox.replaceChildren(img, age);
-}
-
-// Screen position of the preview box, for placing the temporary capture window over it.
-function shotBoxScreenRect(shotBox) {
-    const r = shotBox.getBoundingClientRect();
-    const chromeTop = window.outerHeight - window.innerHeight;   // tab strip + toolbar
-    const chromeSide = (window.outerWidth - window.innerWidth) / 2;
-    return { left: window.screenX + chromeSide + r.left, top: window.screenY + chromeTop + r.top };
-}
-
-// Show the stored screenshot if it matches the tab's current URL; otherwise,
-// after a short hover, ask background.js to capture one (which may briefly
-// load the page muted in a small window over this box).
-async function fillPreviewShot(tab, shotBox, token) {
-    setShotMessage(shotBox, '');
+// Show the last screenshot taken of this tab, if it still matches the tab's
+// URL. Tabs are never loaded just to preview them, so a tab you haven't viewed
+// (e.g. one restored unloaded) only gets a short note.
+async function fillPreviewShot(tab, preview, anchorEl, token) {
     let record = null;
     try { record = await PreviewStore.get(tab.id); } catch (e) { /* no store */ }
     if (token !== previewToken) return;
-    if (record && record.url === tab.url) {
-        showShot(shotBox, record);
-        return;
-    }
-    await sleep(PREVIEW_DWELL_MS);
-    if (token !== previewToken) return;
-    setShotMessage(shotBox, 'Loading preview…');
-    let response;
-    try {
-        response = await chrome.runtime.sendMessage({ type: 'preview_request', tabId: tab.id, rect: shotBoxScreenRect(shotBox) });
-    } catch (e) {
-        response = { ok: false, reason: e.message };
-    }
-    if (token !== previewToken) return;
-    if (!response || !response.ok) {
-        setShotMessage(shotBox, (response && response.reason) || 'No preview available.');
-        return;
-    }
-    try { record = await PreviewStore.get(tab.id); } catch (e) { record = null; }
-    if (token !== previewToken) return;
-    if (record) showShot(shotBox, record);
-    else setShotMessage(shotBox, 'No preview available.');
-}
 
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    if (record && record.url === tab.url && record.blob) {
+        if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl);
+        previewObjectUrl = URL.createObjectURL(record.blob);
+        const shotBox = document.createElement('div');
+        shotBox.id = 'preview-shot';
+        const img = document.createElement('img');
+        img.src = previewObjectUrl;
+        img.alt = 'Tab preview';
+        const age = document.createElement('div');
+        age.className = 'preview-shot-age';
+        age.textContent = 'as of ' + new Date(record.at).toLocaleTimeString();
+        shotBox.append(img, age);
+        preview.appendChild(shotBox);
+    } else {
+        const note = document.createElement('div');
+        note.className = 'preview-none';
+        note.textContent = 'No screenshot yet (taken when you view the tab)';
+        preview.appendChild(note);
+    }
+    positionPreview(preview, anchorEl);
 }
 
 function hideTabPreview() {

@@ -374,16 +374,12 @@ chrome.commands.onCommand.addListener((command) => {
 //   - shortly after a tab is shown or finishes loading,
 //   - right before leaving it via the tab switcher or the board hotkey/icon,
 //   - every 30 seconds for the tab you're looking at.
-// For a tab with no screenshot yet, the board asks for one ("preview_request"):
-// if it is the visible tab of its window we capture it directly, otherwise its
-// URL is loaded (muted, zoomed out) in a small temporary popup window placed
-// over the preview box, captured once loaded, and the window is closed.
+// A tab is never loaded just to preview it: tabs you haven't viewed since
+// the feature was turned on (e.g. restored unloaded tabs) simply have none.
 // Screenshots are shrunk and stored in IndexedDB (PreviewStore in shared.js).
 
 const PREVIEW_WIDTH = 600;          // stored width in px (shown at 300px)
 const CAPTURE_SPACING_MS = 600;     // captureVisibleTab allows ~2 calls/second
-const PREVIEW_LOAD_TIMEOUT_MS = 15000;
-const PREVIEW_ZOOM = 0.33;          // lay pages out ~900px wide in the 300px window
 
 async function previewEnabled() {
   const { fullPreview } = await chrome.storage.local.get("fullPreview");
@@ -494,87 +490,4 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
     if (win && win.focused && win.state !== "minimized") await captureVisible(win.id);
   } catch (e) { /* ignore */ }
-});
-
-function waitForTabComplete(tabId, timeoutMs) {
-  return new Promise(resolve => {
-    const done = () => {
-      clearTimeout(timer);
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    };
-    const listener = (id, changeInfo) => {
-      if (id === tabId && changeInfo.status === "complete") done();
-    };
-    const timer = setTimeout(done, timeoutMs);
-    chrome.tabs.onUpdated.addListener(listener);
-    chrome.tabs.get(tabId).then(t => { if (t.status === "complete") done(); }).catch(done);
-  });
-}
-
-// Load `tab.url` in a temporary popup window, screenshot it, close it.
-async function captureViaTempWindow(tab, rect, returnWindowId) {
-  const win = await chrome.windows.create({
-    url: tab.url,
-    type: "popup",
-    focused: true,
-    width: 300,
-    height: 300,
-    left: Math.round(rect.left),
-    top: Math.round(rect.top),
-  });
-  const tempTabId = win.tabs[0].id;
-  try {
-    await chrome.tabs.update(tempTabId, { muted: true });
-    await waitForTabComplete(tempTabId, PREVIEW_LOAD_TIMEOUT_MS);
-    try {
-      // Per-tab zoom so the site's normal zoom level isn't changed.
-      await chrome.tabs.setZoomSettings(tempTabId, { mode: "automatic", scope: "per-tab" });
-      await chrome.tabs.setZoom(tempTabId, PREVIEW_ZOOM);
-    } catch (e) { /* some pages can't be zoomed; capture as is */ }
-    await new Promise(r => setTimeout(r, 800)); // let it repaint
-    await captureVisible(win.id, { tabId: tab.id, url: tab.url });
-  } finally {
-    await chrome.windows.remove(win.id).catch(() => { });
-    if (returnWindowId != null) chrome.windows.update(returnWindowId, { focused: true }).catch(() => { });
-  }
-}
-
-// One temporary window at a time; repeated requests for a tab share one job.
-const previewJobs = new Map(); // tabId -> Promise
-let tempWindowChain = Promise.resolve();
-
-async function handlePreviewRequest(tabId, rect, returnWindowId) {
-  const tab = await chrome.tabs.get(tabId);
-  if (!canScreenshot(tab.url)) {
-    throw new Error("This kind of page can't be previewed.");
-  }
-  // Visible tab of a window that isn't minimized: capture it directly.
-  if (tab.active && !tab.discarded) {
-    try {
-      const win = await chrome.windows.get(tab.windowId);
-      if (win.state !== "minimized") {
-        await captureVisible(tab.windowId);
-        return;
-      }
-    } catch (e) { /* fall back to loading it */ }
-  }
-  const job = tempWindowChain.then(() => captureViaTempWindow(tab, rect, returnWindowId));
-  tempWindowChain = job.catch(() => { });
-  return job;
-}
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || message.type !== "preview_request") return;
-  const { tabId, rect } = message;
-  if (!previewJobs.has(tabId)) {
-    const returnWindowId = sender.tab ? sender.tab.windowId : null;
-    const job = handlePreviewRequest(tabId, rect || { left: 100, top: 100 }, returnWindowId)
-      .finally(() => previewJobs.delete(tabId));
-    previewJobs.set(tabId, job);
-  }
-  previewJobs.get(tabId)
-    .then(() => sendResponse({ ok: true }))
-    .catch(e => sendResponse({ ok: false, reason: e && e.message ? e.message : String(e) }));
-  return true; // respond asynchronously
 });

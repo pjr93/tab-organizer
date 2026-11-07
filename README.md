@@ -60,7 +60,7 @@ Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing key
 
 A 🔊 next to a tab means it's playing sound and 🔇 means it's muted. Click the icon to mute or unmute without leaving the board.
 
-"full preview" checkbox: hovering a tab shows a 300×300 screenshot of it, labelled with when it was taken. Screenshots are taken shortly after you view a tab, right before you leave it with the switcher or the board button/hotkey, and every 30 seconds for the tab you're looking at, so they show the tab roughly as you left it (e.g. a paused video). If a tab has no screenshot yet (e.g. it was restored unloaded), hover for half a second: the page is loaded muted in a small window over the preview, captured once it finishes loading, and the window closes. Browser-internal pages (chrome://, the web store) can't be previewed. This feature is why the extension asks for access to all websites; screenshots stay on your computer.
+"full preview" checkbox: hovering a tab shows a 300×300 screenshot of it, labelled with when it was taken. Screenshots are taken shortly after you view a tab, right before you leave it with the switcher or the board button/hotkey, and every 30 seconds for the tab you're looking at, so they show the tab roughly as you left it (e.g. a paused video). A tab is never loaded just to preview it, so a tab you haven't viewed since turning this on (e.g. one restored unloaded) shows no picture until you visit it. Browser-internal pages (chrome://, the web store) can't be previewed. This feature is why the extension asks for access to all websites; screenshots stay on your computer.
 
 ## Creating tabs and windows
 
