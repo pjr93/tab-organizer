@@ -527,11 +527,11 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         clearWindowDropMarks();
     });
 
-    // Window being dragged over this box: mark the side it would land on
-    // (boxes flow left-to-right, so left half = before, right half = after).
+    // Window being dragged over this box: mark the side it would land on.
     function windowDropSide(e) {
+        // Boxes stack down columns, so the top half = before, bottom half = after.
         const r = group.getBoundingClientRect();
-        return e.clientX > r.left + r.width / 2 ? 'after' : 'before';
+        return e.clientY > r.top + r.height / 2 ? 'after' : 'before';
     }
 
     group.addEventListener('dragover', e => {
@@ -901,13 +901,40 @@ outsideOverlay.addEventListener('drop', ev => {
 });
 
 //render the board - syncGroupDataFromBrowser - highlightActiveTab
+// Board layout: "shortest column first" masonry. Window boxes are placed in
+// board order, each into whichever column is currently shortest, so they read
+// left-to-right like a grid but each box is only as tall as its tabs need.
+const BOARD_COLUMNS = 2;
+let boardItems = []; // window boxes + the new-window button, in board order
+
+function layoutBoard() {
+    const columns = Array.from({ length: BOARD_COLUMNS }, () => {
+        const col = document.createElement('div');
+        col.className = 'board-column';
+        return col;
+    });
+    parentGrid.replaceChildren(...columns);
+    for (const el of boardItems) {
+        // Leftmost column wins ties, so the first boxes go side by side.
+        let target = columns[0];
+        for (const col of columns) if (col.offsetHeight < target.offsetHeight) target = col;
+        target.appendChild(el);
+    }
+}
+
+// Re-place boxes when the board width changes (tab text wraps differently).
+let layoutTimer = null;
+window.addEventListener('resize', () => {
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(layoutBoard, 150);
+});
+
 function renderBoard() {
-    parentGrid.innerHTML = '';
     groupData = groupData.filter(g => g.length);
-    groupData.forEach((items, idx) => {
+    boardItems = groupData.map((items, idx) => {
         const windowId = items[0]?.windowId;
         const titleText = windowId && titles[windowId] ? titles[windowId] : '-';
-        parentGrid.appendChild(createGroup(items, idx, windowId, titleText));
+        return createGroup(items, idx, windowId, titleText);
     });
     // create a new window
     // because of the issue with updating, first create a new window that is maximized, then return to the previous window (so interaction with reflection board is not interrupted)
@@ -931,7 +958,8 @@ function renderBoard() {
         });
     });
 
-    parentGrid.appendChild(newWindowBtn);
+    boardItems.push(newWindowBtn);
+    layoutBoard();
     highlightActiveTab()
     //console.log("groupData:", groupData)
 }

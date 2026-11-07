@@ -19,11 +19,22 @@
                 2px 2px 0 black;
         } */
 
+        /* Masonry board: two columns filled "shortest column first" by
+           layoutBoard() in main.js, so boxes keep left-to-right order but are
+           only as tall as their tabs need. */
         #parent-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            display: flex;
+            align-items: flex-start;
             gap: 16px;
             padding: 16px;
+        }
+
+        .board-column {
+            flex: 1 1 0;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
 
         .child-grid {
@@ -375,8 +386,7 @@
             cursor: pointer;
             user-select: none;
             transition: opacity 0.2s ease;
-            /* Remove position: fixed to let it flow naturally in the grid */
-            /* The parent grid container's grid layout will position it */
+            width: 100%;
         }
 
         .new-window-btn:hover {
@@ -615,11 +625,11 @@
         }
 
         .child-grid.drop-before {
-            box-shadow: -6px 0 0 0 #2196F3;
+            box-shadow: 0 -6px 0 0 #2196F3;
         }
 
         .child-grid.drop-after {
-            box-shadow: 6px 0 0 0 #2196F3;
+            box-shadow: 0 6px 0 0 #2196F3;
         }
 
         /* Internal saves: save dialog + saves browser */
