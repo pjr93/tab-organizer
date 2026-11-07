@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Tab switcher</title>
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: #111111;
+            color: white;
+            font-family: sans-serif;
+            overflow: hidden;
+        }
+
+        #banner {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            background: #2196F3;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+        }
+
+        #banner .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: white;
+            animation: pulse 1s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            50% { opacity: 0.3; }
+        }
+
+        #hint {
+            padding: 6px 14px;
+            font-size: 12px;
+            color: #aaa;
+            border-bottom: 1px solid #333;
+        }
+
+        #list {
+            list-style: none;
+            margin: 0;
+            padding: 6px;
+            overflow-y: auto;
+            max-height: calc(100% - 80px);
+        }
+
+        #list li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            height: 36px;
+            padding: 0 10px;
+            margin-bottom: 6px;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            background: #1E1E1E;
+            cursor: pointer;
+            font-family: Georgia, 'Times New Roman', Times, serif;
+        }
+
+        #list li.current {
+            border-color: #2196F3;
+            background: #16324a;
+        }
+
+        #list li img {
+            width: 16px;
+            height: 16px;
+            flex: 0 0 auto;
+        }
+
+        #list .title {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        #list .meta {
+            flex: 0 0 auto;
+            color: #888;
+            font-size: 12px;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="banner"><span class="dot"></span>Tab switcher: keyboard input is captured</div>
+    <div id="hint">Release Alt to switch · Alt+Shift+← older / → newer (or ↑ ↓) · Enter to switch · Esc to cancel · click to pick</div>
+    <ul id="list"></ul>
+    <script src="shared.js"></script>
+    <script src="switcher.js"></script>
+</body>
+
+</html>

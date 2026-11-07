@@ -20,6 +20,14 @@ function isOwnPage(url) {
     return typeof url === 'string' && url.startsWith(EXTENSION_ORIGIN);
 }
 
+// Favicon for any page URL, served by the browser (needs the "favicon" permission).
+function getFaviconUrl(pageUrl, size = 32) {
+    const url = new URL(chrome.runtime.getURL('_favicon/'));
+    url.searchParams.set('pageUrl', pageUrl);
+    url.searchParams.set('size', size.toString());
+    return url.toString();
+}
+
 // Saved layout format (JSON files, internal save and autosave):
 //   [{ windowId, title, tabs: [{ id, title, url, windowId, groupId }] }, ...]
 // `groups` is an array of tab arrays, one per window.

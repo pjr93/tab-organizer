@@ -123,24 +123,24 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Tab history (most-recently-used order, like Alt+Tab)                */
+/* Tab history (most-recently-used order) and the tab switcher         */
 /* ------------------------------------------------------------------ */
 //
-// `mru` holds tab ids, most recent first. The board tab is never included.
-// Alt+Shift+Left steps to older tabs, Alt+Shift+Right back toward newer ones.
-// While stepping, the order is frozen; the navigation is "committed" (the
-// landed-on tab moves to the front) once no history key has been pressed for
-// NAV_SETTLE_MS, or as soon as the user activates a tab some other way.
+// `mru` holds tab ids, most recent first. The board tab and tabs in popup
+// windows are never included. It lives in chrome.storage.session so it
+// survives the service worker being suspended and doesn't need the board.
 //
-// The list lives in chrome.storage.session so it survives the service worker
-// being suspended, and does not depend on the board being open.
+// Alt+Shift+Left/Right opens the switcher (switcher.html) in a small popup
+// window listing recent tabs. While it is open it has keyboard focus, so key
+// presses go to it rather than the page. Further presses move the highlight
+// (Left = older, Right = newer); releasing Alt switches to the highlighted
+// tab, Esc cancels. Only the committed tab moves to the front of the list.
 
 const MRU_LIMIT = 200;
-const NAV_SETTLE_MS = 1000;
+const SWITCHER_MAX_ITEMS = 15;
 
 let mru = [];
-let nav = null;           // { cursor, expectedTabId } while stepping through history
-let navTimer = null;
+let switcher = null; // { windowId, pageTabId, items, cursor, originWindowId }
 
 const ready = (async () => {
   const { mru: saved } = await chrome.storage.session.get("mru");
@@ -149,7 +149,7 @@ const ready = (async () => {
     return;
   }
   // First run in this browser session: seed from each tab's last access time.
-  const tabs = await chrome.tabs.query({});
+  const tabs = await chrome.tabs.query({ windowType: "normal" });
   mru = tabs
     .filter(t => !isBoardUrl(t.url))
     .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))
@@ -171,58 +171,148 @@ function moveToFront(tabId) {
   persistMru();
 }
 
-function commitNav() {
-  clearTimeout(navTimer);
-  navTimer = null;
-  if (nav && nav.cursor > 0 && nav.cursor < mru.length) {
-    moveToFront(mru[nav.cursor]);
+async function isNormalWindow(windowId) {
+  try {
+    const win = await chrome.windows.get(windowId);
+    return win.type === "normal";
+  } catch (e) {
+    return false;
   }
-  nav = null;
 }
 
 async function recordActivation(tab) {
   await ready;
-  if (nav && tab.id === nav.expectedTabId) return; // caused by our own navigation
-  commitNav();
-  if (!isBoardUrl(tab.url)) moveToFront(tab.id);
+  if (switcher) return; // the switcher commits its own choice
+  if (isBoardUrl(tab.url) || isOwnPage(tab.url)) return;
+  if (!(await isNormalWindow(tab.windowId))) return;
+  moveToFront(tab.id);
 }
 
-async function navigateHistory(direction) {
-  await ready;
-  if (!nav) {
-    const [current] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    // If the current tab heads the list, the first step should skip it.
-    nav = { cursor: current && current.id === mru[0] ? 0 : -1, expectedTabId: null };
-  }
+/* ---- switcher window ---- */
 
-  const step = direction === "older" ? 1 : -1;
-  let target = nav.cursor + step;
-  while (target >= 0 && target < mru.length) {
-    const tabId = mru[target];
+function tabToItem(tab) {
+  return {
+    id: tab.id,
+    title: tab.title || tab.url || "Untitled",
+    url: tab.url || "",
+    windowId: tab.windowId,
+    discarded: !!tab.discarded,
+    audible: !!tab.audible,
+  };
+}
+
+async function openSwitcher(step) {
+  await ready;
+  const origin = await chrome.windows.getLastFocused({ populate: true });
+  const current = origin && origin.tabs ? origin.tabs.find(t => t.active) : null;
+
+  // Collect the most recent tabs that still exist.
+  const items = [];
+  for (const id of [...mru]) {
+    if (items.length >= SWITCHER_MAX_ITEMS) break;
     try {
-      const tab = await chrome.tabs.get(tabId);
-      nav.cursor = target;
-      nav.expectedTabId = tabId;
-      await chrome.tabs.update(tabId, { active: true });
-      const { historyStayInApp } = await chrome.storage.local.get("historyStayInApp");
-      if (!historyStayInApp) {
-        await chrome.windows.update(tab.windowId, { focused: true });
-      }
-      break;
+      items.push(tabToItem(await chrome.tabs.get(id)));
     } catch (e) {
-      // Tab no longer exists: drop it and try the next one in the same direction.
-      mru.splice(target, 1);
-      persistMru();
-      if (step < 0) {
-        nav.cursor--;   // the removed entry sat before the cursor
-        target += step;
-      }
+      mru.splice(mru.indexOf(id), 1);
     }
   }
+  persistMru();
+  if (!items.length) return;
 
-  clearTimeout(navTimer);
-  navTimer = setTimeout(commitNav, NAV_SETTLE_MS);
+  // If the current tab heads the list, the first step should skip it.
+  const start = current && items[0].id === current.id ? 0 : -1;
+  const cursor = Math.max(0, Math.min(items.length - 1, start + step));
+
+  const width = 520;
+  const rows = Math.min(items.length, 10);
+  const height = 150 + rows * 42;
+  const base = origin && origin.width ? origin : { left: 0, top: 0, width: 1280, height: 800 };
+  const left = Math.round(base.left + (base.width - width) / 2);
+  const top = Math.round(base.top + Math.max(40, (base.height - height) / 3));
+
+  switcher = { windowId: null, pageTabId: null, items, cursor, originWindowId: origin ? origin.id : null };
+  try {
+    const win = await chrome.windows.create({
+      url: chrome.runtime.getURL("switcher.html"),
+      type: "popup",
+      focused: true,
+      width, height, left, top,
+    });
+    if (!switcher) { // cancelled while the window was opening
+      chrome.windows.remove(win.id).catch(() => { });
+      return;
+    }
+    switcher.windowId = win.id;
+    switcher.pageTabId = win.tabs && win.tabs[0] ? win.tabs[0].id : null;
+  } catch (e) {
+    console.warn("Could not open the tab switcher", e);
+    switcher = null;
+  }
 }
+
+function moveSwitcher(step) {
+  if (!switcher) return;
+  switcher.cursor = Math.max(0, Math.min(switcher.items.length - 1, switcher.cursor + step));
+  if (switcher.pageTabId != null) {
+    chrome.tabs.sendMessage(switcher.pageTabId, { type: "switcher_update", cursor: switcher.cursor }).catch(() => { });
+  }
+}
+
+async function closeSwitcherWindow(s) {
+  if (s.windowId != null) await chrome.windows.remove(s.windowId).catch(() => { });
+}
+
+async function commitSwitcher(index) {
+  const s = switcher;
+  if (!s) return;
+  switcher = null;
+  const target = s.items[Number.isInteger(index) ? index : s.cursor];
+  await closeSwitcherWindow(s);
+  if (!target) return;
+  try {
+    const tab = await chrome.tabs.update(target.id, { active: true });
+    const { historyStayInApp } = await chrome.storage.local.get("historyStayInApp");
+    if (historyStayInApp && s.originWindowId != null) {
+      // "view history in app": switch the tab but keep focus where it was.
+      await chrome.windows.update(s.originWindowId, { focused: true });
+    } else {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+    moveToFront(target.id);
+  } catch (e) {
+    // The tab was closed while the switcher was open.
+    const idx = mru.indexOf(target.id);
+    if (idx !== -1) { mru.splice(idx, 1); persistMru(); }
+  }
+}
+
+async function cancelSwitcher() {
+  const s = switcher;
+  if (!s) return;
+  switcher = null;
+  await closeSwitcherWindow(s);
+  if (s.originWindowId != null) chrome.windows.update(s.originWindowId, { focused: true }).catch(() => { });
+}
+
+// Messages from switcher.html
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message.type !== "string" || !message.type.startsWith("switcher_")) return;
+  if (message.type === "switcher_ready") {
+    sendResponse(switcher ? { items: switcher.items, cursor: switcher.cursor } : null);
+    return;
+  }
+  // Ignore stale pages (e.g. a switcher window left over from a previous one).
+  if (!switcher || !sender.tab || sender.tab.windowId !== switcher.windowId) return;
+  if (message.type === "switcher_move") queueSwitcher(() => moveSwitcher(message.step));
+  else if (message.type === "switcher_commit") queueSwitcher(() => commitSwitcher(message.index));
+  else if (message.type === "switcher_cancel") queueSwitcher(() => cancelSwitcher());
+});
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (switcher && switcher.windowId === windowId) switcher = null; // closed by the user
+});
+
+/* ---- tracking activations ---- */
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   let tab;
@@ -232,7 +322,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     return;
   }
   recordActivation(tab);
-  if (!isBoardUrl(tab.url)) {
+  if (!isOwnPage(tab.url) && await isNormalWindow(tab.windowId)) {
     messageBoards({ type: "active_tab_changed", tabId: tab.id });
   }
 });
@@ -251,21 +341,25 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   if (idx === -1) return;
   mru.splice(idx, 1);
   persistMru();
-  if (nav && idx < nav.cursor) nav.cursor--;
 });
 
 /* ------------------------------------------------------------------ */
 /* Keyboard commands                                                   */
 /* ------------------------------------------------------------------ */
 
-// Run history steps one at a time so fast repeated key presses don't interleave.
-let navQueue = Promise.resolve();
-function queueNavigate(direction) {
-  navQueue = navQueue.then(() => navigateHistory(direction)).catch(e => console.warn("History navigation failed", e));
+// Run switcher actions one at a time so fast repeated key presses don't
+// interleave (e.g. a second press arriving while the window is opening).
+let switcherQueue = Promise.resolve();
+function queueSwitcher(fn) {
+  switcherQueue = switcherQueue.then(fn).catch(e => console.warn("Tab switcher action failed", e));
+}
+
+function onHistoryKey(step) {
+  queueSwitcher(() => (switcher ? moveSwitcher(step) : openSwitcher(step)));
 }
 
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "prev_tab") queueNavigate("older");
-  else if (command === "next_tab") queueNavigate("newer");
+  if (command === "prev_tab") onHistoryKey(1);       // older
+  else if (command === "next_tab") onHistoryKey(-1); // newer
   else if (command === "home") openOrFocusBoard();
 });

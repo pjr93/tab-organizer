@@ -350,12 +350,6 @@ function syncGroupDataFromBrowser() {
 
 
 
-function getFaviconUrl(pageUrl, size = 32) {
-    const url = new URL(chrome.runtime.getURL('_favicon/'));
-    url.searchParams.set('pageUrl', pageUrl);
-    url.searchParams.set('size', size.toString());
-    return url.toString();
-}
 
 //edge case for dragging - hideDropIndicator - deactivateOutsideOverlay - showDropIndicator - activateOutsideOverlay
 function onDragAnywhere(ev) {
