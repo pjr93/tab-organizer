@@ -123,6 +123,62 @@
             background-color: rgb(189, 132, 132);
         }
 
+        /* Floats above the topmost selected tab when 2+ tabs are selected. */
+        #selection-toolbar {
+            position: absolute;
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px;
+            background: #1E1E1E;
+            border: 2px solid #666;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px #000a;
+            font-size: 13px;
+            color: #ccc;
+            user-select: none;
+        }
+
+        #selection-toolbar[hidden] {
+            display: none;
+        }
+
+        #selection-toolbar .selection-count {
+            padding: 0 4px;
+        }
+
+        #selection-toolbar button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            background: black;
+            color: #aaa;
+            border: 2px solid #666;
+            border-radius: 10%;
+            font-size: 16px;
+            line-height: 20px;
+            cursor: pointer;
+        }
+
+        #selection-toolbar button svg {
+            width: 15px;
+            height: 15px;
+            fill: currentColor;
+        }
+
+        #selection-toolbar button:hover {
+            background: #2196F3;
+            color: white;
+        }
+
+        #selection-toolbar button[title^="Close"]:hover {
+            background: #b32b2b;
+        }
+
         .grid-item.dragging {
             opacity: 0.5;
         }

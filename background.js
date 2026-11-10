@@ -70,6 +70,7 @@ const RELEVANT_UPDATE_KEYS = ["title", "url", "favIconUrl", "pinned", "groupId",
 function onBrowserChanged() {
   scheduleBoardSync();
   scheduleAutosave();
+  scheduleTitleWork();
 }
 
 chrome.tabs.onCreated.addListener(onBrowserChanged);
@@ -135,6 +136,145 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message && message.type === "autosave_now") runAutosave();
+});
+
+/* ------------------------------------------------------------------ */
+/* Window titles and order across browser restarts                     */
+/* ------------------------------------------------------------------ */
+// Window ids change when the browser restarts, so the id-keyed `titles` map
+// and `windowOrder` can't find the restored windows. We keep
+// `titleSnapshot`: one { title, urls } entry per window, in board order. On
+// startup, each restored window is matched to an entry by its tab URLs:
+//   1. same set of URLs -> match;
+//   2. otherwise the entry sharing the most URLs, if that's at least half of
+//      the window's tabs.
+// A matched window gets the entry's title (if it had one), and the board
+// order is rebuilt from the entries' positions; unmatched windows go last.
+// Windows come back over a few seconds, so matching re-runs after tab/window
+// events until every entry is matched or TITLE_MATCH_WINDOW_MS has passed.
+// While matching is pending (`titleMatch` in session storage) the snapshot is
+// not rewritten, so the old one isn't replaced by the half-restored session.
+
+const TITLE_SNAPSHOT_DELAY_MS = 2000;
+const TITLE_MATCH_WINDOW_MS = 60000;
+let titleWorkTimer = null;
+
+function scheduleTitleWork() {
+  clearTimeout(titleWorkTimer);
+  titleWorkTimer = setTimeout(runTitleWork, TITLE_SNAPSHOT_DELAY_MS);
+}
+
+function windowUrls(win) {
+  return [...new Set((win.tabs || [])
+    .filter(t => !isBoardTab(t))
+    .map(t => t.url || t.pendingUrl)
+    .filter(Boolean))];
+}
+
+async function runTitleWork() {
+  titleWorkTimer = null;
+  const { titleMatch } = await chrome.storage.session.get("titleMatch");
+  if (titleMatch) {
+    if (Date.now() < titleMatch.until && titleMatch.entries.length) {
+      await matchRestoredWindows(titleMatch);
+      return;
+    }
+    await chrome.storage.session.remove("titleMatch"); // done or timed out
+  }
+  await writeTitleSnapshot();
+}
+
+async function writeTitleSnapshot() {
+  const { titles = {}, windowOrder = [] } = await chrome.storage.local.get(["titles", "windowOrder"]);
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+  const rank = id => { const i = windowOrder.indexOf(id); return i === -1 ? Infinity : i; };
+  windows.sort((a, b) => rank(a.id) - rank(b.id));
+  const titleSnapshot = windows
+    .map(w => ({ title: titles[w.id] || "", urls: windowUrls(w) }))
+    .filter(e => e.urls.length);
+  await chrome.storage.local.set({ titleSnapshot });
+}
+
+async function matchRestoredWindows(titleMatch) {
+  const { titles = {}, windowOrder = [] } = await chrome.storage.local.get(["titles", "windowOrder"]);
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+  const alreadyMatched = new Set(titleMatch.matched.map(m => m.winId));
+
+  // Every (window, entry) pair that qualifies, best first.
+  const pairs = [];
+  for (const win of windows) {
+    if (alreadyMatched.has(win.id)) continue;
+    const urls = windowUrls(win);
+    if (!urls.length) continue;
+    titleMatch.entries.forEach((entry, i) => {
+      const saved = new Set(entry.urls);
+      const common = urls.filter(u => saved.has(u)).length;
+      const exact = common === urls.length && common === saved.size;
+      if (exact || common >= urls.length / 2) pairs.push({ win, i, score: exact ? Infinity : common });
+    });
+  }
+  pairs.sort((a, b) => b.score - a.score);
+
+  // Pair greedily: each window and each entry is used once.
+  const usedWins = new Set(), usedEntries = new Set();
+  let titlesChanged = false;
+  for (const { win, i } of pairs) {
+    if (usedWins.has(win.id) || usedEntries.has(i)) continue;
+    usedWins.add(win.id);
+    usedEntries.add(i);
+    const entry = titleMatch.entries[i];
+    titleMatch.matched.push({ winId: win.id, index: entry.index });
+    // Don't overwrite a title the user already typed this session.
+    if (entry.title && !titles[win.id]) { titles[win.id] = entry.title; titlesChanged = true; }
+  }
+
+  if (usedEntries.size) {
+    titleMatch.entries = titleMatch.entries.filter((_, i) => !usedEntries.has(i));
+    // Matched windows in their old order, then everything else as it was.
+    const live = new Set(windows.map(w => w.id));
+    const matchedIds = titleMatch.matched
+      .filter(m => live.has(m.winId))
+      .sort((a, b) => a.index - b.index)
+      .map(m => m.winId);
+    const inMatched = new Set(matchedIds);
+    const rest = [...windowOrder, ...windows.map(w => w.id)]
+      .filter((id, pos, all) => live.has(id) && !inMatched.has(id) && all.indexOf(id) === pos);
+    const update = { windowOrder: [...matchedIds, ...rest] };
+    if (titlesChanged) update.titles = titles;
+    await chrome.storage.local.set(update);
+  }
+
+  if (titleMatch.entries.length) {
+    await chrome.storage.session.set({ titleMatch });
+  } else {
+    await chrome.storage.session.remove("titleMatch");
+    await writeTitleSnapshot();
+  }
+}
+
+chrome.runtime.onStartup.addListener(async () => {
+  const { titleSnapshot = [] } = await chrome.storage.local.get("titleSnapshot");
+  if (!titleSnapshot.length) return;
+  await chrome.storage.session.set({
+    titleMatch: {
+      entries: titleSnapshot.map((e, index) => ({ title: e.title || "", urls: e.urls || [], index })),
+      matched: [],
+      until: Date.now() + TITLE_MATCH_WINDOW_MS,
+    },
+  });
+  scheduleTitleWork();
+});
+
+// Write the snapshot right after install/reload instead of waiting for the
+// first tab change. ("chrome_update" happens at browser startup, where the
+// old snapshot is still needed for matching.)
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason !== "chrome_update") scheduleTitleWork();
+});
+
+// A title edited or a window moved on the board: refresh the snapshot.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && (changes.titles || changes.windowOrder)) scheduleTitleWork();
 });
 
 /* ------------------------------------------------------------------ */

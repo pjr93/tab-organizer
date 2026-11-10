@@ -343,13 +343,18 @@ function createEditableTitleBox(parentElement, windowId) {
 
 // Drop titles for windows that no longer exist (window ids are not reused
 // within a browser session, so a stale entry can never be shown again).
+// Prunes the stored copy rather than our in-memory one, so titles the
+// background worker restored a moment ago aren't overwritten.
 function pruneTitles(windows) {
     const live = new Set(windows.map(w => String(w.id)));
-    let changed = false;
-    for (const id of Object.keys(titles)) {
-        if (!live.has(id)) { delete titles[id]; changed = true; }
-    }
-    if (changed) chrome.storage.local.set({ titles });
+    chrome.storage.local.get('titles', ({ titles: stored = {} }) => {
+        let changed = false;
+        for (const id of Object.keys(stored)) {
+            if (!live.has(id)) { delete stored[id]; changed = true; }
+        }
+        titles = stored;
+        if (changed) chrome.storage.local.set({ titles: stored });
+    });
 }
 
 // Sort windows into the board's saved order; windows not in it yet (new ones)
@@ -610,10 +615,10 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         }
         if (!groupData[idx]) groupData[idx] = [];
         groupData[idx].splice(newIndex, 0, ...tabsToMove);
+        selectedTabIds.clear();
         renderBoard();
         hideDropIndicator();
         deactivateOutsideOverlay();
-        selectedTabIds.clear();
     });
 
     const deleteBtn = document.createElement('button');
@@ -770,6 +775,7 @@ function createGridItem(itemObj) {
 
         // Update lastSelectedIndex to current for next shift-click
         lastSelectedIndex = currentIndex;
+        updateSelectionToolbar();
     });
 
     item.addEventListener('dragstart', e => {
@@ -781,6 +787,7 @@ function createGridItem(itemObj) {
         }
         draggedItem = item;
         draggedId = itemObj.id;
+        selectionToolbar.hidden = true; // back after the drop/re-render
         item.classList.add('dragging');
         setTimeout(() => { item.style.display = 'none'; }, 0);
         document.addEventListener('dragover', onDragAnywhere);
@@ -866,6 +873,13 @@ outsideOverlay.addEventListener('drop', ev => {
         tabsToMove = [itemObj];
     }
 
+    moveTabsToNewWindow(tabsToMove);
+    hideDropIndicator();
+    deactivateOutsideOverlay();
+});
+
+// Move tabs (board items) into a new window, keeping focus on the board's window.
+function moveTabsToNewWindow(tabsToMove) {
     for (const tab of tabsToMove) {
         removeFromGroupData(tab.id);
     }
@@ -902,10 +916,98 @@ outsideOverlay.addEventListener('drop', ev => {
         });
     });
 
-    renderBoard();
-    hideDropIndicator();
-    deactivateOutsideOverlay();
     selectedTabIds.clear();
+    renderBoard();
+}
+
+/* Selection toolbar ------------------------------------------------- */
+// With two or more tabs selected, a small toolbar floats above the topmost
+// selected tab: close them all, or move them to a new window. (A tab's own ×
+// still closes only that tab, like in the browser.) Delete does the same as
+// the close button and Escape clears the selection. The board tab itself is
+// never closed or moved this way.
+
+const selectionToolbar = document.createElement('div');
+selectionToolbar.id = 'selection-toolbar';
+selectionToolbar.hidden = true;
+
+const selectionCount = document.createElement('span');
+selectionCount.className = 'selection-count';
+
+const closeSelectedBtn = document.createElement('button');
+closeSelectedBtn.type = 'button';
+closeSelectedBtn.textContent = '×';
+closeSelectedBtn.title = 'Close selected tabs (Delete)';
+closeSelectedBtn.addEventListener('click', closeSelectedTabs);
+
+const moveSelectedBtn = document.createElement('button');
+moveSelectedBtn.type = 'button';
+moveSelectedBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>';
+moveSelectedBtn.title = 'Move selected tabs to a new window';
+moveSelectedBtn.addEventListener('click', () => {
+    const tabs = selectedActionTabs();
+    if (tabs.length) moveTabsToNewWindow(tabs);
+});
+
+selectionToolbar.append(selectionCount, moveSelectedBtn, closeSelectedBtn);
+// Clicks on the toolbar must not reach the board (which could change the selection).
+selectionToolbar.addEventListener('mousedown', e => e.stopPropagation());
+document.body.appendChild(selectionToolbar);
+
+// Selected tabs that still exist, in on-screen order, without the board tab.
+function selectedActionTabs() {
+    const screenOrder = Array.from(document.querySelectorAll('.grid-item')).map(el => Number(el.dataset.id));
+    return Array.from(selectedTabIds)
+        .map(id => getItemById(id))
+        .filter(t => t && !isBoardTab(t))
+        .sort((a, b) => screenOrder.indexOf(a.id) - screenOrder.indexOf(b.id));
+}
+
+function closeSelectedTabs() {
+    const ids = selectedActionTabs().map(t => t.id);
+    if (!ids.length) return;
+    selectedTabIds.clear();
+    updateSelectionToolbar();
+    chrome.tabs.remove(ids, () => syncGroupDataFromBrowser());
+}
+
+function clearSelection() {
+    selectedTabIds.clear();
+    document.querySelectorAll('.grid-item.selected').forEach(el => el.classList.remove('selected'));
+    updateSelectionToolbar();
+}
+
+function updateSelectionToolbar() {
+    // Forget tabs that have closed since they were selected.
+    for (const id of selectedTabIds) if (!getItemById(id)) selectedTabIds.delete(id);
+    const els = Array.from(document.querySelectorAll('.grid-item.selected'));
+    if (selectedTabIds.size < 2 || !els.length) {
+        selectionToolbar.hidden = true;
+        return;
+    }
+    // Topmost selected tab (leftmost on ties).
+    let top = null, topRect = null;
+    for (const el of els) {
+        const r = el.getBoundingClientRect();
+        if (!top || r.top < topRect.top || (r.top === topRect.top && r.left < topRect.left)) { top = el; topRect = r; }
+    }
+    selectionCount.textContent = `${selectedTabIds.size} selected`;
+    selectionToolbar.hidden = false;
+    const h = selectionToolbar.offsetHeight;
+    selectionToolbar.style.left = `${Math.max(4, topRect.left + window.scrollX)}px`;
+    selectionToolbar.style.top = `${Math.max(4, topRect.top + window.scrollY - h - 4)}px`;
+}
+
+window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (document.querySelector('dialog[open]')) return;
+    if (e.key === 'Delete' && selectedTabIds.size) {
+        e.preventDefault();
+        closeSelectedTabs();
+    } else if (e.key === 'Escape' && selectedTabIds.size) {
+        clearSelection();
+    }
 });
 
 //render the board - syncGroupDataFromBrowser - highlightActiveTab
@@ -978,6 +1080,7 @@ function layoutBoard() {
     // Only touch the scroll position if it moved: an unconditional scrollTo
     // would cut short a "zoom to window" smooth scroll that is under way.
     if (window.scrollX !== keepX || window.scrollY !== keepY) window.scrollTo(keepX, keepY);
+    updateSelectionToolbar(); // tabs may have moved
 }
 
 // Re-place boxes when the board width changes (tab text wraps differently).
@@ -1175,6 +1278,26 @@ chrome.storage.session.get('boardFocusWindow').then(({ boardFocusWindow }) => {
     if (boardFocusWindow && Date.now() - boardFocusWindow.at < 15000) focusWindowBox(boardFocusWindow.id);
     chrome.storage.session.remove('boardFocusWindow');
 }).catch(() => { });
+
+// Titles and order can also change outside this page: after a browser restart
+// the background worker gives restored windows their old titles and places back.
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.titles) {
+        const next = changes.titles.newValue || {};
+        if (JSON.stringify(next) !== JSON.stringify(titles)) { // not our own write
+            titles = next;
+            if (groupData) renderBoard();
+        }
+    }
+    if (changes.windowOrder) {
+        const next = changes.windowOrder.newValue || [];
+        if (next.join() !== windowOrder.join()) {
+            windowOrder = next;
+            syncGroupDataFromBrowser(); // re-sorts the boxes
+        }
+    }
+});
 
 chrome.storage.local.get(['titles', 'windowOrder'], (result) => {
     if (result && result.titles) titles = result.titles;
