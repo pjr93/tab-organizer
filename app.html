@@ -10,23 +10,44 @@
 
 <body>
 <div class="button-container">
-    <button id="internal-save-btn" class="state-btn" title="Ctrl+S">Save (Internal)</button>
-    <button id="internal-load-btn" class="state-btn">Load (Internal)</button>
-    <button id="download-btn" class="state-btn">Save JSON</button>
-    <button id="upload-btn" class="state-btn">Upload JSON</button>
-    <button id="add-btn" class="state-btn">Add JSON</button>
+    <button id="internal-save-btn" class="state-btn" data-hint="Save every window as an internal save (Ctrl+S)">Save (Internal)</button>
+    <button id="internal-load-btn" class="state-btn" data-hint="Browse internal saves to load or add one">Load (Internal)</button>
+    <button id="download-btn" class="state-btn" data-hint="Download every window as a JSON file">Save JSON</button>
+    <button id="upload-btn" class="state-btn" data-hint="Replace the open tabs (except this board) with a JSON file">Upload JSON</button>
+    <button id="add-btn" class="state-btn" data-hint="Open a JSON file's windows alongside the current ones">Add JSON</button>
     <input type="file" id="upload-file-input" accept=".json" />
     <input type="file" id="add-file-input" accept=".json" />
+    <!-- Options dropdown. -->
+    <div class="settings">
+        <button type="button" id="settings-btn" class="state-btn" aria-expanded="false" aria-controls="settings-panel"
+            data-hint="Options">⚙ Settings</button>
+        <div id="settings-panel" hidden>
+            <label class="settings-option" data-hint="Tab history hotkeys switch the tab in its window but keep you on the board">
+                <input type="checkbox" id="active-tab-history"> view history in app
+            </label>
+            <label class="settings-option" data-hint="Saves your session about 10 seconds after tabs change. Restore it with Load (Internal).">
+                <input type="checkbox" id="autosave"> autosave
+            </label>
+            <label class="settings-option" data-hint="Hovering a tab shows a popup with its title and address">
+                <input type="checkbox" id="tab-tooltip"> tab tooltip
+            </label>
+            <label class="settings-option" data-hint="Adds a screenshot to the tab tooltip. Tabs without one are loaded muted in a small window and captured.">
+                <input type="checkbox" id="full-preview"> full preview
+            </label>
+            <label class="settings-option" data-hint="Show what things do in the line next to the title">
+                <input type="checkbox" id="hints-enabled"> hints
+            </label>
+            <label class="settings-option" data-hint="How long a hint stays up, in seconds. 0 keeps it up until the next one.">
+                hint seconds <input type="number" id="hint-seconds" min="0" step="0.5">
+            </label>
+        </div>
+    </div>
 </div>
-<div class="checkbox-container">
-    <input type="checkbox" id="active-tab-history" name="active-tab-history-state" class="checkbox">
-    <label for="active-tab-history">view history in app</label>
-    <input type="checkbox" id="autosave" name="autosave-state" class="checkbox">
-    <label for="autosave" title="Saves your session about 10 seconds after tabs change. Restore it with Load (Internal).">autosave</label>
-    <input type="checkbox" id="full-preview" name="full-preview-state" class="checkbox">
-    <label for="full-preview" title="Hovering a tab shows a 300×300 screenshot. Tabs without one are loaded muted in a small window and captured.">full preview</label>
-</div>
-    <h2>Reflection Board</h2>
+    <!-- Title with the hover-hint line (hints.js) to its right. -->
+    <div class="board-header">
+        <h2>Reflection Board</h2>
+        <span id="hint-line" aria-live="polite"></span>
+    </div>
 
 
     <div id="parent-grid"></div>
@@ -71,6 +92,7 @@
     <script src="shared.js"></script>
     <script src="main.js"></script>
     <script src="saves.js"></script>
+    <script src="hints.js"></script>
     <script src="switcher-overlay.js"></script>
 </body>
 

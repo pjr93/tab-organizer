@@ -26,6 +26,7 @@ let currentActiveTabId = null;
 // Built with DOM nodes / textContent (not innerHTML) so page titles and URLs
 // can never inject markup into the extension page.
 function showTabPreview(tab, anchorEl) {
+    if (!tabTooltipEnabled) return;
     let preview = document.getElementById('tab-hover-preview');
     if (!preview) {
         preview = document.createElement('div');
@@ -77,6 +78,7 @@ function positionPreview(preview, anchorEl) {
 let previewToken = 0;      // bumps on every show/hide so stale async work is ignored
 let previewObjectUrl = null;
 let fullPreviewEnabled = false;
+let tabTooltipEnabled = true; // "tab tooltip" setting
 const PREVIEW_SCALE = 8;   // previews show at 1/8 of the captured size
 
 // Show the last screenshot taken of this tab, if it still matches the tab's
@@ -331,6 +333,7 @@ function createEditableTitleBox(parentElement, windowId) {
     title.className = 'editable-title';
     title.id = `window-title-${windowId}`;
     title.value = titles[windowId] || "";
+    title.dataset.hint = 'Name this window. The name comes back after a browser restart.';
     parentElement.appendChild(title);
     
     title.addEventListener('change', () =>{
@@ -506,7 +509,9 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     const plusTabBtn = document.createElement('button');
     plusTabBtn.className = 'plus-tab-btn';
     plusTabBtn.textContent = '＋';
-    plusTabBtn.title = "Add new tab";
+    plusTabBtn.title = "Add a new tab to this window (in the background)";
+    // Shown when hovering the box's empty space (hints.js).
+    group.dataset.hint = 'Drag empty space here to reorder this window on the board. Drop tabs here to move them into it.';
     plusTabBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (windowId != null) {
@@ -624,7 +629,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'group-delete-btn';
     deleteBtn.textContent = '×';
-    deleteBtn.title = "Delete this group";
+    deleteBtn.title = "Close this window and all its tabs";
     deleteBtn.addEventListener('click', e => {
         e.stopPropagation();
         if (groupData[idx] && groupData[idx].length > 0) {
@@ -816,6 +821,7 @@ function createGridItem(itemObj) {
     const btn = document.createElement('button');
     btn.className = 'delete-btn';
     btn.textContent = '×';
+    btn.title = 'Close just this tab (other selected tabs stay open)';
     btn.onclick = e => {
         e.stopPropagation();
         chrome.tabs.remove(itemObj.id, () => {
@@ -1221,6 +1227,33 @@ chrome.storage.local.get(['fullPreview'], (result) => {
 fullPreviewCheckbox.addEventListener('change', (e) => {
     fullPreviewEnabled = e.target.checked;
     chrome.storage.local.set({ fullPreview: fullPreviewEnabled });
+});
+
+// "tab tooltip": the hover popup with a tab's title and address (on by default).
+const tabTooltipCheckbox = document.getElementById('tab-tooltip');
+chrome.storage.local.get(['tabTooltip'], ({ tabTooltip }) => {
+    tabTooltipEnabled = tabTooltip !== false;
+    tabTooltipCheckbox.checked = tabTooltipEnabled;
+});
+tabTooltipCheckbox.addEventListener('change', (e) => {
+    tabTooltipEnabled = e.target.checked;
+    if (!tabTooltipEnabled) hideTabPreview();
+    chrome.storage.local.set({ tabTooltip: tabTooltipEnabled });
+});
+
+// Settings dropdown in the top bar. Closes on a click outside it or Escape.
+const settingsBtn = document.getElementById('settings-btn');
+const settingsPanel = document.getElementById('settings-panel');
+function setSettingsOpen(open) {
+    settingsPanel.hidden = !open;
+    settingsBtn.setAttribute('aria-expanded', String(open));
+}
+settingsBtn.addEventListener('click', () => setSettingsOpen(settingsPanel.hidden));
+document.addEventListener('mousedown', (e) => {
+    if (!settingsPanel.hidden && !e.target.closest('.settings')) setSettingsOpen(false);
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !settingsPanel.hidden) setSettingsOpen(false);
 });
 
 
