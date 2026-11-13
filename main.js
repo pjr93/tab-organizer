@@ -25,8 +25,11 @@ let currentActiveTabId = null;
 
 // Built with DOM nodes / textContent (not innerHTML) so page titles and URLs
 // can never inject markup into the extension page.
+// The text (title + address) and the screenshot each have their own setting;
+// with only the screenshot on, the popup appears once the screenshot is ready.
 function showTabPreview(tab, anchorEl) {
-    if (!tabTooltipEnabled) return;
+    const wantShot = fullPreviewEnabled && !isBoardTab(tab);
+    if (!tabTooltipEnabled && !wantShot) return;
     let preview = document.getElementById('tab-hover-preview');
     if (!preview) {
         preview = document.createElement('div');
@@ -34,6 +37,14 @@ function showTabPreview(tab, anchorEl) {
         document.body.appendChild(preview);
     }
     preview.replaceChildren();
+    const token = ++previewToken;
+    preview.style.maxWidth = '';
+
+    if (!tabTooltipEnabled) {
+        preview.style.display = "none";
+        fillPreviewShot(tab, preview, anchorEl, token);
+        return;
+    }
 
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;align-items:center;gap:8px;';
@@ -55,11 +66,9 @@ function showTabPreview(tab, anchorEl) {
 
     preview.append(header, urlEl);
 
-    const token = ++previewToken;
-    preview.style.maxWidth = '';
     preview.style.display = "block";
     positionPreview(preview, anchorEl);
-    if (fullPreviewEnabled && !isBoardTab(tab)) fillPreviewShot(tab, preview, anchorEl, token);
+    if (wantShot) fillPreviewShot(tab, preview, anchorEl, token);
 }
 
 // Place below the tile, or above it if there isn't room; keep it on screen.
@@ -117,6 +126,7 @@ async function fillPreviewShot(tab, preview, anchorEl, token) {
         note.textContent = 'No screenshot yet (taken when you view the tab)';
         preview.appendChild(note);
     }
+    preview.style.display = "block"; // still hidden if the text is turned off
     positionPreview(preview, anchorEl);
 }
 
@@ -258,12 +268,15 @@ async function restoreState(saved, { replace = false } = {}) {
             // Keep the user on the board while the rest of the window fills in.
             await chrome.windows.update(boardWindow.id, { focused: true });
 
+            // Store the title right away: board refreshes during the restore
+            // reload `titles` from storage (pruneTitles), which would
+            // otherwise drop a title only held in memory.
             if (win.title && win.title !== '_' && win.title !== '-') {
                 titles[newWindow.id] = win.title;
             }
             // Keep the saved board order: each restored window goes to the end.
             windowOrder = windowOrder.filter(id => id !== newWindow.id).concat(newWindow.id);
-            chrome.storage.local.set({ windowOrder });
+            chrome.storage.local.set({ windowOrder, titles });
 
             const results = await runLimited(rest, 6, tab => createUnloadedTab(newWindow.id, tab.url));
             results.forEach((r, i) => { if (!r.ok) failed.push(rest[i].url); });
@@ -322,6 +335,18 @@ function defaultSessionName() {
     return 'Session ' + new Date().toLocaleString();
 }
 
+// Default save name for some windows' tabs: one window uses its board title
+// (or its first real tab's title), several get a dated session name.
+function saveNameFor(groups) {
+    if (groups.length !== 1) return defaultSessionName();
+    const tabs = groups[0];
+    return titles[tabs[0].windowId] || tabs.find(t => !isBoardTab(t))?.title || 'Window';
+}
+
+// Icons shared by the window boxes and the selection toolbar.
+const ICON_DOWNLOAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v9.17l2.59-2.58L17 11l-5 5-5-5 1.41-1.41L11 12.17V3zm-6 15h14v3H5v-3z"/></svg>';
+const ICON_SAVE_INTERNAL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 2v4h8V5H7zm5 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>';
+
 function saveSessionInternal() {
     if (document.querySelector('dialog[open]')) return;
     openSaveDialog(serializeGroups(groupData || []), defaultSessionName());
@@ -354,6 +379,11 @@ function pruneTitles(windows) {
         let changed = false;
         for (const id of Object.keys(stored)) {
             if (!live.has(id)) { delete stored[id]; changed = true; }
+        }
+        // Keep titles set on this page that haven't reached storage yet
+        // (e.g. a window a restore has just created).
+        for (const [id, title] of Object.entries(titles)) {
+            if (live.has(id) && !(id in stored)) { stored[id] = title; changed = true; }
         }
         titles = stored;
         if (changed) chrome.storage.local.set({ titles: stored });
@@ -511,7 +541,8 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     plusTabBtn.textContent = '＋';
     plusTabBtn.title = "Add a new tab to this window (in the background)";
     // Shown when hovering the box's empty space (hints.js).
-    group.dataset.hint = 'Drag empty space here to reorder this window on the board. Drop tabs here to move them into it.';
+    group.dataset.hint = 'Click empty space here to select all its tabs (Ctrl+click to add/remove, Shift+click for a range) · ' +
+        'Drag it to reorder this window on the board · Drop tabs here to move them into it';
     plusTabBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (windowId != null) {
@@ -528,6 +559,12 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     // that land directly on it.
     group.addEventListener('mousedown', e => {
         group.draggable = e.target === group;
+    });
+    // Clicking the same empty space (without dragging) selects the window's
+    // tabs, with the same Ctrl/Shift rules as clicking a tab.
+    group.addEventListener('click', e => {
+        if (e.target !== group) return; // a tab, button or the title
+        handleSelectClick(e, Array.from(group.querySelectorAll('.grid-item')));
     });
     group.addEventListener('dragstart', e => {
         if (e.target !== group) return; // a tab being dragged (bubbled up)
@@ -648,7 +685,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     const saveBtn = document.createElement('button');
     saveBtn.className = 'group-save-btn';
     saveBtn.textContent = '';
-    saveBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v9.17l2.59-2.58L17 11l-5 5-5-5 1.41-1.41L11 12.17V3zm-6 15h14v3H5v-3z" />'
+    saveBtn.innerHTML = ICON_DOWNLOAD;
     saveBtn.title = 'Download this window as JSON';
     saveBtn.windowId = windowId
     saveBtn.addEventListener('click', (e) => {
@@ -663,14 +700,13 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     // Save this window as an internal save (a one-window session).
     const saveInternalBtn = document.createElement('button');
     saveInternalBtn.className = 'group-save-btn group-save-internal-btn';
-    saveInternalBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 2v4h8V5H7zm5 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>';
+    saveInternalBtn.innerHTML = ICON_SAVE_INTERNAL;
     saveInternalBtn.title = 'Save this window internally';
     saveInternalBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const tabs = groupData[idx];
         if (!tabs || !tabs.length) return;
-        const name = titles[windowId] || tabs.find(t => !isBoardTab(t))?.title || 'Window';
-        openSaveDialog(serializeGroups([tabs]), name);
+        openSaveDialog(serializeGroups([tabs]), saveNameFor([tabs]));
     });
     group.appendChild(saveInternalBtn);
 
@@ -740,48 +776,7 @@ function createGridItem(itemObj) {
     item.dataset.id = itemObj.id;
 
 
-    item.addEventListener('click', (e) => {
-        // Get the full flat list of all tab elements in the order shown on screen
-        const allItems = Array.from(document.querySelectorAll('.grid-item'));
-        const currentIndex = allItems.indexOf(item);
-
-        if (e.shiftKey && lastSelectedIndex !== null) {
-            const start = Math.min(currentIndex, lastSelectedIndex);
-            const end = Math.max(currentIndex, lastSelectedIndex);
-
-            // Clear previous selected classes to avoid stale selections
-            allItems.forEach(el => el.classList.remove('selected'));
-            selectedTabIds.clear();
-
-            // Select the range between lastSelectedIndex and currentIndex (inclusive)
-            for (let i = start; i <= end; i++) {
-                const rangeItem = allItems[i];
-                const id = Number(rangeItem.dataset.id);
-                selectedTabIds.add(id);
-                rangeItem.classList.add('selected');
-            }
-        } else if (e.ctrlKey || e.metaKey) {
-            const id = Number(item.dataset.id);
-            if (selectedTabIds.has(id)) {
-                selectedTabIds.delete(id);
-                item.classList.remove('selected');
-            } else {
-                selectedTabIds.add(id);
-                item.classList.add('selected');
-            }
-        } else {
-            // Normal click: clear all previous selections and select only the clicked tab
-            allItems.forEach(el => el.classList.remove('selected'));
-            selectedTabIds.clear();
-            const id = Number(item.dataset.id);
-            selectedTabIds.add(id);
-            item.classList.add('selected');
-        }
-
-        // Update lastSelectedIndex to current for next shift-click
-        lastSelectedIndex = currentIndex;
-        updateSelectionToolbar();
-    });
+    item.addEventListener('click', (e) => handleSelectClick(e, [item]));
 
     item.addEventListener('dragstart', e => {
         if (!selectedTabIds.has(itemObj.id)) {
@@ -926,12 +921,69 @@ function moveTabsToNewWindow(tabsToMove) {
     renderBoard();
 }
 
+/* Selection ---------------------------------------------------------- */
+// Tabs are selected by clicking a tab, or a window box's empty space (all its
+// tabs). Both go through handleSelectClick so they follow the same rules:
+//   click        - select only these tabs
+//   Ctrl+click   - add them, or remove them if they are all selected already
+//   Shift+click  - select everything from the anchor (the last clicked tab)
+//                  through these tabs, in page order
+// Clicking empty board space (outside every window) clears the selection.
+
+// Tab elements in page order (what Shift+click ranges over).
+function allTabEls() {
+    return Array.from(document.querySelectorAll('.grid-item'));
+}
+
+// `els`: the clicked tab elements (one tab, or every tab of a window).
+function handleSelectClick(e, els) {
+    const all = allTabEls();
+    const indexes = els.map(el => all.indexOf(el)).filter(i => i !== -1);
+    if (!indexes.length) return;
+    const first = Math.min(...indexes);
+    const last = Math.max(...indexes);
+    const ids = els.map(el => Number(el.dataset.id));
+
+    if (e.shiftKey && lastSelectedIndex !== null && all.length) {
+        const anchor = Math.min(lastSelectedIndex, all.length - 1);
+        const start = Math.min(anchor, first);
+        const end = Math.max(anchor, last);
+        selectedTabIds.clear();
+        for (let i = start; i <= end; i++) selectedTabIds.add(Number(all[i].dataset.id));
+        // The anchor moves to the clicked end, as with a single tab.
+        lastSelectedIndex = anchor <= first ? last : first;
+    } else if (e.ctrlKey || e.metaKey) {
+        const allSelected = ids.every(id => selectedTabIds.has(id));
+        for (const id of ids) {
+            if (allSelected) selectedTabIds.delete(id);
+            else selectedTabIds.add(id);
+        }
+        lastSelectedIndex = first;
+    } else {
+        selectedTabIds.clear();
+        for (const id of ids) selectedTabIds.add(id);
+        lastSelectedIndex = first;
+    }
+    syncSelectedClasses();
+}
+
+// Make the tiles' highlight match selectedTabIds.
+function syncSelectedClasses() {
+    for (const el of allTabEls()) el.classList.toggle('selected', selectedTabIds.has(Number(el.dataset.id)));
+    updateSelectionToolbar();
+}
+
+document.addEventListener('click', (e) => {
+    if (!selectedTabIds.size) return;
+    if (e.target.closest('.child-grid, #selection-toolbar, dialog, .button-container, .new-window-btn')) return;
+    clearSelection();
+});
+
 /* Selection toolbar ------------------------------------------------- */
-// With two or more tabs selected, a small toolbar floats above the topmost
-// selected tab: close them all, or move them to a new window. (A tab's own ×
-// still closes only that tab, like in the browser.) Delete does the same as
-// the close button and Escape clears the selection. The board tab itself is
-// never closed or moved this way.
+// With any tab selected, a small toolbar floats above the topmost selected
+// tab: download or save them, move them to a new window, or close them all.
+// (A tab's own × still closes only that tab, like in the browser.) Delete does
+// the same as the close button and Escape clears the selection.
 
 const selectionToolbar = document.createElement('div');
 selectionToolbar.id = 'selection-toolbar';
@@ -951,26 +1003,55 @@ moveSelectedBtn.type = 'button';
 moveSelectedBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>';
 moveSelectedBtn.title = 'Move selected tabs to a new window';
 moveSelectedBtn.addEventListener('click', () => {
-    const tabs = selectedActionTabs();
+    const tabs = selectedTabs();
     if (tabs.length) moveTabsToNewWindow(tabs);
 });
 
-selectionToolbar.append(selectionCount, moveSelectedBtn, closeSelectedBtn);
+// Download / save the selected tabs. Each tab stays in the window it is in
+// now (with that window's title); to save them as one window, move them to a
+// new window first.
+const downloadSelectedBtn = document.createElement('button');
+downloadSelectedBtn.type = 'button';
+downloadSelectedBtn.innerHTML = ICON_DOWNLOAD;
+downloadSelectedBtn.title = 'Download selected tabs as JSON';
+downloadSelectedBtn.addEventListener('click', () => {
+    const groups = selectedTabsByWindow();
+    if (groups.length) downloadStateAsFile(groups);
+});
+
+const saveSelectedBtn = document.createElement('button');
+saveSelectedBtn.type = 'button';
+saveSelectedBtn.innerHTML = ICON_SAVE_INTERNAL;
+saveSelectedBtn.title = 'Save selected tabs internally';
+saveSelectedBtn.addEventListener('click', () => {
+    const groups = selectedTabsByWindow();
+    if (groups.length) openSaveDialog(serializeGroups(groups), saveNameFor(groups));
+});
+
+selectionToolbar.append(selectionCount, downloadSelectedBtn, saveSelectedBtn, moveSelectedBtn, closeSelectedBtn);
 // Clicks on the toolbar must not reach the board (which could change the selection).
 selectionToolbar.addEventListener('mousedown', e => e.stopPropagation());
 document.body.appendChild(selectionToolbar);
 
-// Selected tabs that still exist, in on-screen order, without the board tab.
-function selectedActionTabs() {
-    const screenOrder = Array.from(document.querySelectorAll('.grid-item')).map(el => Number(el.dataset.id));
+// Selected tabs that still exist, in on-screen order.
+function selectedTabs() {
+    const screenOrder = allTabEls().map(el => Number(el.dataset.id));
     return Array.from(selectedTabIds)
         .map(id => getItemById(id))
-        .filter(t => t && !isBoardTab(t))
+        .filter(Boolean)
         .sort((a, b) => screenOrder.indexOf(a.id) - screenOrder.indexOf(b.id));
 }
 
+// Selected tabs grouped by the window they are in (board order, tab order),
+// i.e. the `groups` shape that serializeGroups / downloadStateAsFile take.
+function selectedTabsByWindow() {
+    return (groupData || [])
+        .map(group => group.filter(tab => selectedTabIds.has(tab.id)))
+        .filter(group => group.length);
+}
+
 function closeSelectedTabs() {
-    const ids = selectedActionTabs().map(t => t.id);
+    const ids = selectedTabs().map(t => t.id);
     if (!ids.length) return;
     selectedTabIds.clear();
     updateSelectionToolbar();
@@ -987,7 +1068,7 @@ function updateSelectionToolbar() {
     // Forget tabs that have closed since they were selected.
     for (const id of selectedTabIds) if (!getItemById(id)) selectedTabIds.delete(id);
     const els = Array.from(document.querySelectorAll('.grid-item.selected'));
-    if (selectedTabIds.size < 2 || !els.length) {
+    if (!selectedTabIds.size || !els.length) {
         selectionToolbar.hidden = true;
         return;
     }
@@ -1229,7 +1310,8 @@ fullPreviewCheckbox.addEventListener('change', (e) => {
     chrome.storage.local.set({ fullPreview: fullPreviewEnabled });
 });
 
-// "tab tooltip": the hover popup with a tab's title and address (on by default).
+// "preview text": the tab's title and address in the hover popup (on by
+// default). The screenshot part is "preview screenshot" (fullPreview) above.
 const tabTooltipCheckbox = document.getElementById('tab-tooltip');
 chrome.storage.local.get(['tabTooltip'], ({ tabTooltip }) => {
     tabTooltipEnabled = tabTooltip !== false;
@@ -1237,7 +1319,7 @@ chrome.storage.local.get(['tabTooltip'], ({ tabTooltip }) => {
 });
 tabTooltipCheckbox.addEventListener('change', (e) => {
     tabTooltipEnabled = e.target.checked;
-    if (!tabTooltipEnabled) hideTabPreview();
+    hideTabPreview(); // shows again with the new setting on the next hover
     chrome.storage.local.set({ tabTooltip: tabTooltipEnabled });
 });
 

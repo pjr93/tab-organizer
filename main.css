@@ -332,6 +332,12 @@
             font-style: italic;
         }
 
+        /* Screenshot only (preview text turned off): no gap above it. */
+        #preview-shot:first-child,
+        .preview-none:first-child {
+            margin-top: 0;
+        }
+
         .preview-shot-age {
             position: absolute;
             right: 4px;
@@ -772,6 +778,8 @@
         /* Empty space in a window box is the drag area for moving it */
         .child-grid {
             cursor: grab;
+            /* Shift+clicking a box selects its tabs, not page text. */
+            user-select: none;
         }
 
         .child-grid.window-dragging {

@@ -80,6 +80,14 @@ Click the title box in a window to name it. Names are kept while the window stay
 
 You can rearrange tabs within a box and it will also change the order of the tab in the main browser UI. Click, Shift+click and Ctrl+click select several tabs to drag together.
 
+Clicking a window box's empty space (around or between its tabs) selects all of its tabs, and Ctrl+click / Shift+click work the same way as on tabs: Ctrl+click adds the window's tabs (or removes them if they're all selected already), Shift+click selects everything from the last tab you clicked through that window. Dragging the box still moves the window. Clicking empty board space outside every window clears the selection.
+
+Whenever a tab is selected, a small toolbar appears above the selection:
+
+- **Download** / **Save internally**: saves just the selected tabs, the same way as a window's own buttons. Each tab is saved in the window it's in now, with that window's title. To save them together as one window, move them to a new window first.
+- **Move to a new window**.
+- **Close** all selected tabs (same as the Delete key). Esc clears the selection.
+
 You can drag a tab between windows by moving them to a different box
 
 If you drag a tab outside of all the boxes, it will open that tab in a new window. It will not focus to that window, but of course you can right click on it to get immediately to the new window and its first tab.
