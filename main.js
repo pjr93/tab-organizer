@@ -12,6 +12,9 @@ let placeholder = null;
 let nextItemId = 1;
 let windowGroupData = [];
 let titles = {};
+// Windows whose box is minimized on the board (window id -> true). Only the
+// box shrinks; the real browser window is untouched. Kept like `titles`.
+let minimizedWindows = {};
 // Board order of windows (window ids). The browser API has no window order to
 // read or set, so the board keeps its own; new windows are appended. Saves are
 // written in this order and restores create windows in it, so it carries over.
@@ -88,6 +91,7 @@ let previewToken = 0;      // bumps on every show/hide so stale async work is ig
 let previewObjectUrl = null;
 let fullPreviewEnabled = false;
 let tabTooltipEnabled = true; // "tab tooltip" setting
+let audioGlowEnabled = true;  // "audio glow" setting
 const PREVIEW_SCALE = 8;   // previews show at 1/8 of the captured size
 
 // Show the last screenshot taken of this tab, if it still matches the tab's
@@ -168,7 +172,7 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Convert board groups into the saved format.
 function serializeGroups(groups = groupData) {
-    return serializeTabGroups(groups, titles);
+    return serializeTabGroups(groups, titles, minimizedWindows);
 }
 
 // Throws a readable error if `saved` isn't a layout we can restore.
@@ -179,6 +183,8 @@ function prepareSavedLayout(saved) {
         .filter(win => win && Array.isArray(win.tabs))
         .map(win => ({
             title: typeof win.title === 'string' ? win.title : '',
+            // Older saves have no `minimized` key: they open expanded.
+            minimized: win.minimized === true,
             tabs: win.tabs.filter(t => t && typeof t.url === 'string' && t.url && !isBoardTab(t)),
         }))
         .filter(win => win.tabs.length > 0);
@@ -274,9 +280,10 @@ async function restoreState(saved, { replace = false } = {}) {
             if (win.title && win.title !== '_' && win.title !== '-') {
                 titles[newWindow.id] = win.title;
             }
+            if (win.minimized) minimizedWindows[newWindow.id] = true; // same for the box state
             // Keep the saved board order: each restored window goes to the end.
             windowOrder = windowOrder.filter(id => id !== newWindow.id).concat(newWindow.id);
-            chrome.storage.local.set({ windowOrder, titles });
+            chrome.storage.local.set({ windowOrder, titles, minimizedWindows });
 
             const results = await runLimited(rest, 6, tab => createUnloadedTab(newWindow.id, tab.url));
             results.forEach((r, i) => { if (!r.ok) failed.push(rest[i].url); });
@@ -345,11 +352,14 @@ function saveNameFor(groups) {
 
 // Icons shared by the window boxes and the selection toolbar.
 const ICON_DOWNLOAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v9.17l2.59-2.58L17 11l-5 5-5-5 1.41-1.41L11 12.17V3zm-6 15h14v3H5v-3z"/></svg>';
-const ICON_SAVE_INTERNAL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 2v4h8V5H7zm5 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>';
+const ICON_FORCE_LOAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>';
+const ICON_SAVE_INTERNAL ='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm2 2v4h8V5H7zm5 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>';
 
 function saveSessionInternal() {
     if (document.querySelector('dialog[open]')) return;
-    openSaveDialog(serializeGroups(groupData || []), defaultSessionName());
+    // Offers the last whole-session save's name (saves.js, lastSessionSave).
+    openSaveDialog(serializeGroups(groupData || []), defaultSessionName(), { kind: 'session' });
 }
 
 
@@ -369,24 +379,32 @@ function createEditableTitleBox(parentElement, windowId) {
     return title;
 }
 
-// Drop titles for windows that no longer exist (window ids are not reused
-// within a browser session, so a stale entry can never be shown again).
-// Prunes the stored copy rather than our in-memory one, so titles the
-// background worker restored a moment ago aren't overwritten.
+// Drop titles and minimized states for windows that no longer exist (window
+// ids are not reused within a browser session, so a stale entry can never be
+// shown again).
 function pruneTitles(windows) {
     const live = new Set(windows.map(w => String(w.id)));
-    chrome.storage.local.get('titles', ({ titles: stored = {} }) => {
+    pruneWindowMap('titles', live, () => titles, v => { titles = v; });
+    pruneWindowMap('minimizedWindows', live, () => minimizedWindows, v => { minimizedWindows = v; });
+}
+
+// Prunes the stored copy of a window-id-keyed map rather than our in-memory
+// one, so entries the background worker restored a moment ago aren't
+// overwritten, then adopts it.
+function pruneWindowMap(key, live, getMemory, setMemory) {
+    chrome.storage.local.get(key, (result) => {
+        const stored = (result && result[key]) || {};
         let changed = false;
         for (const id of Object.keys(stored)) {
             if (!live.has(id)) { delete stored[id]; changed = true; }
         }
-        // Keep titles set on this page that haven't reached storage yet
+        // Keep entries set on this page that haven't reached storage yet
         // (e.g. a window a restore has just created).
-        for (const [id, title] of Object.entries(titles)) {
-            if (live.has(id) && !(id in stored)) { stored[id] = title; changed = true; }
+        for (const [id, value] of Object.entries(getMemory())) {
+            if (live.has(id) && !(id in stored)) { stored[id] = value; changed = true; }
         }
-        titles = stored;
-        if (changed) chrome.storage.local.set({ titles: stored });
+        setMemory(stored);
+        if (changed) chrome.storage.local.set({ [key]: stored });
     });
 }
 
@@ -545,13 +563,20 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         'Drag it to reorder this window on the board · Drop tabs here to move them into it';
     plusTabBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (windowId != null) {
-            chrome.tabs.create({ windowId: windowId, active: false }, () => {
-                syncGroupDataFromBrowser();
-            });
-        }
+        addTabToWindow(windowId);
     });
-    group.appendChild(plusTabBtn);
+
+    // The same action as a tile in the next free slot after the last tab.
+    const newTabTile = document.createElement('button');
+    newTabTile.type = 'button';
+    newTabTile.className = 'new-tab-tile';
+    newTabTile.textContent = '+';
+    newTabTile.draggable = false;
+    newTabTile.dataset.hint = 'Add a new tab at the end of this window (in the background)';
+    newTabTile.addEventListener('click', (e) => {
+        e.stopPropagation();
+        addTabToWindow(windowId);
+    });
 
     // Move the whole window box by dragging its empty space (the padding and
     // the gaps between tabs). Pressing on a tab, button or the title keeps
@@ -605,7 +630,9 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         placeholder.style.minHeight = draggedItem.offsetHeight + 'px';
         placeholder.style.width = draggedItem.offsetWidth + 'px';
         if (afterElement == null) {
-            group.appendChild(placeholder);
+            // End of the window: after the last tab, before the new-tab tile.
+            if (newTabTile.parentElement === group) group.insertBefore(placeholder, newTabTile);
+            else group.appendChild(placeholder);
         } else {
             group.insertBefore(placeholder, afterElement);
         }
@@ -679,7 +706,6 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
             renderBoard();
         }
     });
-    group.appendChild(deleteBtn);
 
     // Save group button
     const saveBtn = document.createElement('button');
@@ -695,7 +721,6 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
             downloadStateAsFile([groupDataToSave]);
         }
     });
-    group.appendChild(saveBtn);
 
     // Save this window as an internal save (a one-window session).
     const saveInternalBtn = document.createElement('button');
@@ -708,14 +733,106 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         if (!tabs || !tabs.length) return;
         openSaveDialog(serializeGroups([tabs]), saveNameFor([tabs]));
     });
-    group.appendChild(saveInternalBtn);
+
+    // Force load this window's unloaded tabs (force-load.js).
+    const forceLoadBtn = document.createElement('button');
+    forceLoadBtn.className = 'group-save-btn group-force-load-btn';
+    forceLoadBtn.innerHTML = ICON_FORCE_LOAD;
+    forceLoadBtn.title = "Load this window's unloaded tabs in the background (pauses videos, takes screenshots)";
+    forceLoadBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        forceLoadTabs((groupData[idx] || []).map(t => t.id));
+    });
+
+    // Minimize / expand the box (only on the board; the real window is untouched).
+    const minimized = windowId != null && !!minimizedWindows[windowId];
+    const minimizeBtn = document.createElement('button');
+    minimizeBtn.className = 'group-save-btn group-minimize-btn';
+    minimizeBtn.textContent = minimized ? '□' : '–';
+    minimizeBtn.title = minimized ? 'Expand this window on the board' : 'Minimize this window on the board (the browser window is not affected)';
+    minimizeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setWindowsMinimized([windowId], !minimized);
+    });
+
+    // All of the box's buttons in one row on the title's row (shown on hover).
+    const windowBar = document.createElement('div');
+    windowBar.className = 'window-bar';
+    windowBar.append(forceLoadBtn, saveBtn, saveInternalBtn, plusTabBtn, minimizeBtn, deleteBtn);
+    group.appendChild(windowBar);
+
+    // A minimized box hides its tabs (CSS) and shows a one-line summary
+    // instead; clicking the summary expands it again.
+    if (minimized) {
+        group.classList.add('minimized');
+        const summary = document.createElement('div');
+        summary.className = 'minimized-summary';
+        summary.dataset.hint = 'Minimized window: click to expand it';
+        const icons = document.createElement('span');
+        icons.className = 'minimized-icons';
+        for (const tab of items.slice(0, MINIMIZED_ICON_COUNT)) {
+            const img = document.createElement('img');
+            img.src = getFaviconUrl(tab.url, 16);
+            img.alt = '';
+            icons.appendChild(img);
+        }
+        const count = document.createElement('span');
+        count.textContent = `${items.length} tab${items.length === 1 ? '' : 's'}`;
+        summary.append(icons, count);
+        summary.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setWindowsMinimized([windowId], false);
+        });
+        group.appendChild(summary);
+    }
 
     for (const itemObj of items) {
         //console.log('item obj:',itemObj)
         group.appendChild(createGridItem(itemObj));
     }
+    if (windowId != null) group.appendChild(newTabTile);
     createEditableTitleBox(group, windowId);
     return group;
+}
+
+const MINIMIZED_ICON_COUNT = 12; // favicons shown in a minimized box's summary
+
+// Minimize or expand window boxes on the board, and remember it (saved with
+// sessions like titles; see serializeTabGroups).
+function setWindowsMinimized(windowIds, minimize) {
+    for (const id of windowIds) {
+        if (id == null) continue;
+        if (minimize) minimizedWindows[id] = true;
+        else delete minimizedWindows[id];
+    }
+    chrome.storage.local.set({ minimizedWindows });
+    renderBoard();
+}
+
+// Top-bar button: minimizes every box, or expands them all if every box is
+// already minimized. Its label says which it will do.
+function boardWindowIds() {
+    return (groupData || []).map(g => g[0] && g[0].windowId).filter(id => id != null);
+}
+
+function allWindowsMinimized() {
+    const ids = boardWindowIds();
+    return ids.length > 0 && ids.every(id => minimizedWindows[id]);
+}
+
+function updateMinimizeAllButton() {
+    const btn = document.getElementById('minimize-all-btn');
+    btn.textContent = allWindowsMinimized() ? 'Expand all' : 'Minimize all';
+}
+
+document.getElementById('minimize-all-btn').addEventListener('click', () => {
+    setWindowsMinimized(boardWindowIds(), !allWindowsMinimized());
+});
+
+// New background tab at the end of a window.
+function addTabToWindow(windowId) {
+    if (windowId == null) return;
+    chrome.tabs.create({ windowId, active: false }, () => syncGroupDataFromBrowser());
 }
 
 // Speaker icon for tabs that are playing sound (🔊) or muted (🔇). Clicking it
@@ -732,9 +849,17 @@ function createAudioButton(itemObj) {
     btn.addEventListener('mousedown', e => e.stopPropagation());
     btn.addEventListener('click', e => {
         e.stopPropagation();
+        // Stop the glow right away; the re-render after the update confirms it.
+        if (!muted) btn.closest('.grid-item')?.classList.remove('audio-glow');
         chrome.tabs.update(itemObj.id, { muted: !muted });
     });
     return btn;
+}
+
+// Playing sound and not muted. (`audible` stays true for a muted tab that is
+// still producing sound, so the mute state must be checked too.)
+function isPlayingAudio(itemObj) {
+    return !!itemObj.audible && !(itemObj.mutedInfo && itemObj.mutedInfo.muted);
 }
 
 //creates the tab UI element - onDragAnywhere - hideDropIndicator - deactivateOutsideOverlay - clearPlaceholder - showTabPreview - hideTabPreview
@@ -767,6 +892,12 @@ function createGridItem(itemObj) {
     item.appendChild(textSpan);
     if (itemObj.id === currentActiveTabId) {
         item.classList.add('active-tab-glow');
+    }
+    if (audioGlowEnabled && isPlayingAudio(itemObj)) {
+        item.classList.add('audio-glow');
+    }
+    if (forceLoadPending.has(itemObj.id)) {
+        item.classList.add('force-loading');
     }
     if (isBoardTab(itemObj)) {
         item.style.background = "green";
@@ -921,6 +1052,106 @@ function moveTabsToNewWindow(tabsToMove) {
     renderBoard();
 }
 
+/* Force load --------------------------------------------------------- */
+// Loads unloaded tabs in the background, pauses their media and screenshots
+// them; the work is done by the service worker (force-load.js). Started from
+// the top bar (every tab), a window's bar (its tabs) or the selection toolbar.
+// The worker publishes progress in chrome.storage.session "forceLoad"; tabs
+// still pending pulse purple and the top-bar button shows the count.
+
+let forceLoadPending = new Set();
+let forceLoadProgress = { done: 0, total: 0, failed: 0 };
+
+async function forceLoadTabs(tabIds) {
+    if (!tabIds.length) return;
+    let reply = null;
+    try {
+        reply = await chrome.runtime.sendMessage({ type: 'force_load', tabIds });
+    } catch (e) {
+        console.warn('Force load could not start:', e);
+    }
+    if (reply && reply.error) alert(`Force load could not start: ${reply.error}`);
+    else if (reply && reply.queued === 0 && !tabIds.some(id => forceLoadPending.has(id))) {
+        alert(tabIds.length === 1 ? 'This tab is already loaded.' : 'These tabs are already loaded.');
+    }
+}
+
+function applyForceLoadState(state) {
+    forceLoadPending = new Set((state && state.pending) || []);
+    forceLoadProgress = {
+        done: (state && state.done) || 0,
+        total: (state && state.total) || 0,
+        failed: (state && state.failed) || 0,
+    };
+    for (const el of allTabEls()) el.classList.toggle('force-loading', forceLoadPending.has(Number(el.dataset.id)));
+    const btn = document.getElementById('force-load-btn');
+    const { done, total, failed } = forceLoadProgress;
+    if (!total) btn.textContent = 'Load all tabs';
+    else if (forceLoadPending.size) btn.textContent = `Loading ${done}/${total}…`;
+    else btn.textContent = failed ? `Loaded ${total} (${failed} had problems)` : `Loaded ${total}`;
+}
+
+document.getElementById('force-load-btn').addEventListener('click', () => {
+    forceLoadTabs((groupData || []).flat().map(t => t.id));
+});
+
+chrome.storage.session.get('forceLoad').then(({ forceLoad }) => applyForceLoadState(forceLoad)).catch(() => { });
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'session' && changes.forceLoad) applyForceLoadState(changes.forceLoad.newValue);
+});
+
+// Force load settings, read by force-load.js (defaults must match it):
+//   "load timeout seconds": the longest it waits for each page's load to
+//       complete before screenshotting it and moving on (default 6).
+//   "parallel loads": how many tabs load at once (default 8, at most 32).
+function bindForceLoadNumber(inputId, key, fallback, { max = Infinity, integer = false } = {}) {
+    const input = document.getElementById(inputId);
+    const clean = v => {
+        let n = Number(v);
+        if (integer) n = Math.round(n);
+        return n > 0 ? Math.min(n, max) : null;
+    };
+    chrome.storage.local.get(key, (result) => {
+        input.value = clean(result && result[key]) ?? fallback;
+    });
+    input.addEventListener('change', () => {
+        const n = clean(input.value);
+        input.value = n ?? fallback;
+        chrome.storage.local.set({ [key]: n ?? fallback });
+    });
+}
+bindForceLoadNumber('force-load-timeout', 'forceLoadTimeoutSec', 6);
+bindForceLoadNumber('force-load-parallel', 'forceLoadParallel', 8, { max: 32, integer: true });
+
+/* Pause media -------------------------------------------------------- */
+// Pauses the video/audio players in tabs (the service worker injects the same
+// pause used by force load; media-control.js). From the top bar (every tab)
+// or the selection toolbar. Tabs stay open; the audio glow goes away once the
+// browser notices the sound stopped.
+
+async function pauseMediaTabs(tabIds) {
+    if (!tabIds.length) return null;
+    try {
+        return await chrome.runtime.sendMessage({ type: 'pause_media', tabIds });
+    } catch (e) {
+        console.warn('Pause media failed:', e);
+        return null;
+    }
+}
+
+const pauseAllBtn = document.getElementById('pause-all-btn');
+let pauseAllLabelTimer = null;
+pauseAllBtn.addEventListener('click', async () => {
+    const reply = await pauseMediaTabs((groupData || []).flat().map(t => t.id));
+    if (!reply) return;
+    // Say what happened for a moment, then go back to the normal label.
+    pauseAllBtn.textContent = reply.paused
+        ? `Paused ${reply.paused} in ${reply.tabs} tab${reply.tabs === 1 ? '' : 's'}`
+        : 'Nothing playing';
+    clearTimeout(pauseAllLabelTimer);
+    pauseAllLabelTimer = setTimeout(() => { pauseAllBtn.textContent = 'Pause all media'; }, 2500);
+});
+
 /* Selection ---------------------------------------------------------- */
 // Tabs are selected by clicking a tab, or a window box's empty space (all its
 // tabs). Both go through handleSelectClick so they follow the same rules:
@@ -981,7 +1212,8 @@ document.addEventListener('click', (e) => {
 
 /* Selection toolbar ------------------------------------------------- */
 // With any tab selected, a small toolbar floats above the topmost selected
-// tab: download or save them, move them to a new window, or close them all.
+// tab: download or save them, force load them, pause their media, move them
+// to a new window, or close them all.
 // (A tab's own × still closes only that tab, like in the browser.) Delete does
 // the same as the close button and Escape clears the selection.
 
@@ -1028,7 +1260,23 @@ saveSelectedBtn.addEventListener('click', () => {
     if (groups.length) openSaveDialog(serializeGroups(groups), saveNameFor(groups));
 });
 
-selectionToolbar.append(selectionCount, downloadSelectedBtn, saveSelectedBtn, moveSelectedBtn, closeSelectedBtn);
+const forceLoadSelectedBtn = document.createElement('button');
+forceLoadSelectedBtn.type = 'button';
+forceLoadSelectedBtn.innerHTML = ICON_FORCE_LOAD;
+forceLoadSelectedBtn.title = 'Load selected tabs in the background (pauses videos, takes screenshots)';
+forceLoadSelectedBtn.addEventListener('click', () => {
+    forceLoadTabs(selectedTabs().map(t => t.id));
+});
+
+const pauseSelectedBtn = document.createElement('button');
+pauseSelectedBtn.type = 'button';
+pauseSelectedBtn.innerHTML = ICON_PAUSE;
+pauseSelectedBtn.title = 'Pause videos and audio in the selected tabs';
+pauseSelectedBtn.addEventListener('click', () => {
+    pauseMediaTabs(selectedTabs().map(t => t.id));
+});
+
+selectionToolbar.append(selectionCount, downloadSelectedBtn, saveSelectedBtn, forceLoadSelectedBtn, pauseSelectedBtn, moveSelectedBtn, closeSelectedBtn);
 // Clicks on the toolbar must not reach the board (which could change the selection).
 selectionToolbar.addEventListener('mousedown', e => e.stopPropagation());
 document.body.appendChild(selectionToolbar);
@@ -1072,10 +1320,13 @@ function updateSelectionToolbar() {
         selectionToolbar.hidden = true;
         return;
     }
-    // Topmost selected tab (leftmost on ties).
+    // Topmost selected tab (leftmost on ties). Tabs in a minimized box are
+    // hidden, so for those the box itself is the anchor.
     let top = null, topRect = null;
     for (const el of els) {
-        const r = el.getBoundingClientRect();
+        const anchor = el.offsetParent ? el : el.closest('.child-grid');
+        if (!anchor) continue;
+        const r = anchor.getBoundingClientRect();
         if (!top || r.top < topRect.top || (r.top === topRect.top && r.left < topRect.left)) { top = el; topRect = r; }
     }
     selectionCount.textContent = `${selectedTabIds.size} selected`;
@@ -1208,6 +1459,7 @@ function renderBoard() {
     });
 
     boardItems.push(newWindowBtn);
+    updateMinimizeAllButton();
     layoutBoard();
     applyPendingFocus();
     highlightActiveTab()
@@ -1323,6 +1575,20 @@ tabTooltipCheckbox.addEventListener('change', (e) => {
     chrome.storage.local.set({ tabTooltip: tabTooltipEnabled });
 });
 
+// "audio glow": tabs playing sound (and not muted) pulse with a blue border
+// (on by default).
+const audioGlowCheckbox = document.getElementById('audio-glow');
+chrome.storage.local.get(['audioGlow'], ({ audioGlow }) => {
+    audioGlowEnabled = audioGlow !== false;
+    audioGlowCheckbox.checked = audioGlowEnabled;
+    if (groupData && !audioGlowEnabled) renderBoard(); // board may have drawn before this loaded
+});
+audioGlowCheckbox.addEventListener('change', (e) => {
+    audioGlowEnabled = e.target.checked;
+    chrome.storage.local.set({ audioGlow: audioGlowEnabled });
+    if (groupData) renderBoard();
+});
+
 // Settings dropdown in the top bar. Closes on a click outside it or Escape.
 const settingsBtn = document.getElementById('settings-btn');
 const settingsPanel = document.getElementById('settings-panel');
@@ -1394,14 +1660,22 @@ chrome.storage.session.get('boardFocusWindow').then(({ boardFocusWindow }) => {
     chrome.storage.session.remove('boardFocusWindow');
 }).catch(() => { });
 
-// Titles and order can also change outside this page: after a browser restart
-// the background worker gives restored windows their old titles and places back.
+// Titles, order and minimized boxes can also change outside this page: after a
+// browser restart the background worker gives restored windows their old
+// titles, minimized state and places back.
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (changes.titles) {
         const next = changes.titles.newValue || {};
         if (JSON.stringify(next) !== JSON.stringify(titles)) { // not our own write
             titles = next;
+            if (groupData) renderBoard();
+        }
+    }
+    if (changes.minimizedWindows) {
+        const next = changes.minimizedWindows.newValue || {};
+        if (JSON.stringify(next) !== JSON.stringify(minimizedWindows)) { // not our own write
+            minimizedWindows = next;
             if (groupData) renderBoard();
         }
     }
@@ -1414,8 +1688,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
 });
 
-chrome.storage.local.get(['titles', 'windowOrder'], (result) => {
+chrome.storage.local.get(['titles', 'windowOrder', 'minimizedWindows'], (result) => {
     if (result && result.titles) titles = result.titles;
+    if (result && result.minimizedWindows) minimizedWindows = result.minimizedWindows;
     if (result && Array.isArray(result.windowOrder)) windowOrder = result.windowOrder;
     syncGroupDataFromBrowser();
 });

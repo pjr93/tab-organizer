@@ -29,15 +29,18 @@ function getFaviconUrl(pageUrl, size = 32) {
 }
 
 // Saved layout format (JSON files, internal save and autosave):
-//   [{ windowId, title, tabs: [{ id, title, url, windowId, groupId }] }, ...]
-// `groups` is an array of tab arrays, one per window.
-function serializeTabGroups(groups, titles) {
+//   [{ windowId, title, minimized, tabs: [{ id, title, url, windowId, groupId }] }, ...]
+// `groups` is an array of tab arrays, one per window. `minimized` is whether
+// the window's box is minimized on the board (not the real window); saves
+// made before it existed lack the key, and a missing key means expanded.
+function serializeTabGroups(groups, titles, minimized = {}) {
     return groups.map(group => {
         if (!group || !group.length) return null;
         const windowId = group[0].windowId;
         return {
             windowId,
             title: titles[windowId] || '',
+            minimized: !!minimized[windowId],
             tabs: group.map(tab => ({
                 id: tab.id,
                 title: tab.title,

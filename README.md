@@ -62,13 +62,17 @@ Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing key
 
 A 🔊 next to a tab means it's playing sound and 🔇 means it's muted. Click the icon to mute or unmute without leaving the board.
 
+"audio glow" setting (on by default): a tab that's playing sound gets a blue border that pulses every 3 seconds. It stops as soon as you mute the tab (or the sound stops).
+
 "full preview" checkbox: hovering a tab shows a screenshot of it at 1/8 of its real size (so it keeps the tab's shape), labelled with when it was taken. Screenshots are taken shortly after you view a tab, right before you leave it with the switcher or the board button/hotkey, and every 30 seconds for the tab you're looking at, so they show the tab roughly as you left it (e.g. a paused video). A tab is never loaded just to preview it, so a tab you haven't viewed since turning this on (e.g. one restored unloaded) shows no picture until you visit it. Browser-internal pages (chrome://, the web store) can't be previewed. The extension asks for access to all websites for this feature and for drawing the tab switcher over pages; screenshots stay on your computer.
 
 ## Creating tabs and windows
 
-You can create a new tab by hovering the mouse and clicking the "+" button at the bottom right corner. You can close a tab by hovering over the tab until the "x" button appears and then you can click it.
+You can create a new tab by clicking the "+" tile after a window's last tab, or by hovering the window and clicking the "+" in its button row. Either way the tab opens at the end of that window, in the background. You can close a tab by hovering over the tab until the "x" button appears and then you can click it.
 
-You can also close an entire window by clicking the "x" at the top right corner of the main box.
+Hovering a window box shows its buttons in a row on the same line as its title, on the right: load its tabs (see **Load all tabs** below), download, save internally, new tab, minimize, and "x" to close the window and all its tabs.
+
+**Minimize** ("–") shrinks a window box on the board to one line showing its tabs' icons and how many there are; the real browser window isn't touched. Click that line or the "□" button to expand it again. **Minimize all** at the top minimizes every box, or expands them all when they're all minimized. Minimized boxes stay minimized when the board is reloaded or the browser restarts, and saves (internal, JSON and autosave) remember which windows were minimized. Saves made before this existed open with every window expanded.
 
 You can open a new window by clicking the "+" outside of all the other windows. The board scrolls to the new window and highlights it (the same happens when you drag tabs out of all the boxes to make a new window). Adding a tab with a window's own "+" doesn't scroll.
 
@@ -100,15 +104,19 @@ There are two kinds of save states: **internal** and **JSON file**. Both save ev
   - Browse folders (click to open, use the path at the top to go back), search, or click **New folder** to make one where you are.
   - Type a name and press **Save**. If that name already exists in the folder, it's highlighted as you type, and Save asks whether to replace it.
   - Click an existing save to reuse its name; double-click it to save over it straight away (after confirming).
-  - It opens in the folder you last saved to. If you last replaced a save, that save is pre-selected; otherwise a dated default name is filled in.
-- **Save window internally** (the disk icon on each window box, under the download icon): saves just that window the same way, as a one-window session.
+  - Ctrl+S / Save (Internal) opens on your last whole-session save (in its folder, pre-selected), so saving over it again is one step. Saving a single window doesn't change which save that is, and autosaves never count. If you haven't saved a session yet, a dated default name is filled in, in the folder you last saved to.
+  - A window's own save button (and the selection toolbar's) always starts with that window's name: its title, or the first tab's title if it has none.
+- **Save window internally** (the disk icon in each window box's button row): saves just that window the same way, as a one-window session.
 - **autosave** checkbox: saves your session automatically about 10 seconds after tabs or windows change, into its own slot (it never touches your named saves). When the browser starts, the last autosave is kept as "Autosave from previous browser session", so a fresh empty session can't overwrite it.
 - **Load (Internal)**: browse your internal saves.
   - Folders: click a folder to open it, use the path at the top to go back. **New folder** creates one inside the folder you're in (folders can be nested). Deleting a folder asks first and also deletes everything inside it.
   - Search: the search bar finds saves by name, or by the title/URL of any tab inside them, across all folders.
-  - Each save has **Load** (replaces your open tabs), **Add** (opens it alongside them), **Export JSON** (downloads it as a file you can load later with Upload JSON) and **Delete** (asks first).
+  - Each save has **Add** (opens it alongside your open tabs), **Export JSON** (downloads it as a file you can load later with Upload JSON), **Load** (replaces your open tabs) and **Delete** (asks first).
   - Autosaves are in the read-only "Autosaves" folder.
-- **Save JSON**: downloads `tab_layout.json`. I recommend saving it in the app's "saved-tabs" folder. The download icon on each window box downloads just that window.
+- In both the Save and Load dialogs:
+  - **Sort** with the dropdown next to the search bar: newest/oldest first, name A–Z/Z–A, or most/fewest tabs. Folders stay above saves and sort the same way (by their newest save, or by all the tabs inside them). The choice is remembered and shared by both dialogs.
+  - **Drag** a save or a folder onto a folder to move it there (drag near the top or bottom of the list, or above/below it, to scroll), or onto a folder in the path at the top (e.g. "Top level") to move it up. Hold it over a folder for a moment (it fills up blue) to open that folder, so you can drop inside it or go further down. After a drop, the dialog opens the folder it went into, briefly highlights the moved item and says what was moved where. Moving a folder takes its subfolders and saves with it. If a save with the same name is already there, you're asked whether to replace it; a folder with the same name already there blocks the move. Autosaves can't be moved.
+- **Save JSON**: downloads `tab_layout.json`. I recommend saving it in the app's "saved-tabs" folder. The download icon in each window box's button row downloads just that window.
 - **Upload JSON**: replaces your open tabs with the windows in a saved file.
 - **Add JSON**: opens the windows from a saved file alongside the tabs you already have.
 
@@ -118,6 +126,21 @@ WARNING: some browser-internal pages (e.g. brave://extensions) can't be reopened
 
 Doing a save then an upload at least once will cache that folder location (at least unless you download or upload something else).
 
+
+## Pausing media
+
+**Pause all media** (in the top bar) pauses every video and audio player in all your open tabs, using the same pause as Load all tabs, so it works on any site. The tabs stay open, and the button briefly says how many players it paused. The selection toolbar has the same pause button for just the selected tabs. Tabs that aren't loaded and browser pages are skipped.
+
+## Load all tabs
+
+Restored tabs, tabs the browser unloaded to save memory, and tabs that haven't loaded since the browser restarted only load when you open them. **Load all tabs** (next to Settings) loads them in the background instead. The same button is in each window box's button row (just that window) and in the selection toolbar (just the selected tabs). Tabs that are already loaded are left alone.
+
+- Tabs load 8 at a time (the "parallel loads" setting, 1–32). While a tab is waiting, loading or being screenshotted it keeps its place on the board with a pulsing purple border, and the button counts the progress.
+- Each page moves on as soon as it finishes loading, or after the "load timeout seconds" setting (default 6), so slow ads and trackers don't hold things up. Screenshots are taken separately, so the next tabs keep loading meanwhile.
+- Tabs are muted while they load, and any video or audio that starts playing is paused, from the moment the page starts loading until a few seconds after it has loaded (this works on any site, including players inside embedded frames). The mute is undone afterwards.
+- How long each tab took (load, screenshot) is logged in the extension's service worker console: open chrome://extensions, click "service worker" under Tab Organizer, and look for "[force load]" lines.
+- A screenshot is taken of each loaded page for the hover preview. To take screenshots of tabs you aren't looking at, the extension uses Chrome's debugging interface, so Chrome shows a "Tab Organizer started debugging this browser" bar while it runs. It goes away by itself when the loading finishes.
+- The loading carries on if you close or reload the board.
 
 # To do
 

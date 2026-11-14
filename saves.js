@@ -3,8 +3,9 @@
 // Storage: chrome.storage.local "internalSaves" =
 //   { folders: ["Work", "Work/Research", ...],
 //     saves: [{ id, name, folder, at, windows }],
-//     lastSavedId }                 // save most recently created or overwritten
-// and "lastSaveAction": "new" | "overwrite" (what the last save did).
+//     lastSavedId,                  // save most recently created or overwritten
+//     lastSessionSaveId }           // same, counting only whole-session saves
+//                                   // (Ctrl+S / Save (Internal)); never autosaves
 // `folder` is a "/"-separated path; "" is the top level. `windows` uses the
 // same layout format as JSON files (serializeTabGroups in shared.js), so a
 // save can be exported and later loaded with Upload JSON.
@@ -21,6 +22,23 @@ const AUTOSAVE_SLOTS = [
 ];
 
 let lastSaveFolder = '';       // folder last saved into (default for the next new save)
+
+// Sort order for both dialogs' lists, kept in chrome.storage.local "savesSort".
+// Folders are listed before saves and sorted by the same rule: by name, by
+// their newest save, or by the tabs in all their saves (subfolders included).
+// Ties are broken by name.
+const SAVE_SORTS = [
+    ['date-desc', 'Newest first'],
+    ['date-asc', 'Oldest first'],
+    ['name-asc', 'Name A–Z'],
+    ['name-desc', 'Name Z–A'],
+    ['tabs-desc', 'Most tabs'],
+    ['tabs-asc', 'Fewest tabs'],
+];
+let savesSort = 'date-desc';
+chrome.storage.local.get('savesSort').then(({ savesSort: stored }) => {
+    if (SAVE_SORTS.some(([v]) => v === stored)) savesSort = stored;
+}).catch(() => { });
 
 /* ---------------- storage ---------------- */
 
@@ -66,7 +84,35 @@ function isInFolderTree(path, root) {
 }
 
 function childFolders(store, path) {
-    return store.folders.filter(f => parentFolder(f) === path).sort((a, b) => a.localeCompare(b));
+    return store.folders.filter(f => parentFolder(f) === path);
+}
+
+// `items` are { name, at, tabs }; returns a sorted copy.
+function sortBy(items, sort = savesSort) {
+    const [field, dir] = sort.split('-');
+    const sign = dir === 'asc' ? 1 : -1;
+    const byName = (x, y) => x.name.localeCompare(y.name, undefined, { numeric: true, sensitivity: 'base' });
+    return [...items].sort((x, y) => {
+        if (field === 'name') return sign * byName(x, y);
+        const c = field === 'tabs' ? x.tabs - y.tabs : (x.at || 0) - (y.at || 0);
+        return c ? sign * c : byName(x, y);
+    });
+}
+
+function sortSaves(saves) {
+    return sortBy(saves.map(s => ({ name: s.name, at: s.at, tabs: countTabs(s.windows), save: s }))).map(i => i.save);
+}
+
+function sortFolders(store, paths) {
+    return sortBy(paths.map(path => {
+        const inside = store.saves.filter(s => isInFolderTree(s.folder, path));
+        return {
+            name: path.split('/').pop(),
+            at: inside.reduce((m, s) => Math.max(m, s.at || 0), 0),
+            tabs: inside.reduce((n, s) => n + countTabs(s.windows), 0),
+            path,
+        };
+    })).map(i => i.path);
 }
 
 function countTabs(windows) {
@@ -99,13 +145,242 @@ async function getAutosaves() {
 //                double-click to choose it (onActivate); no autosaves
 //                (they can't be overwritten). onRender runs after each render.
 
-function createSavesBrowser({ listEl, pathEl, searchEl, newFolderBtn = null, mode, onPick = null, onActivate = null, onRender = null }) {
-    const b = { folder: '', selectedId: null, store: null, listEl, pathEl, searchEl, newFolderBtn, mode, onPick, onActivate, onRender };
+// Both modes: the sort dropdown (sortEl), and dragging saves / folders onto a
+// folder row or a crumb in the path bar moves them there (autosaves can't be
+// moved or dropped into).
+
+function createSavesBrowser({ listEl, pathEl, searchEl, sortEl = null, newFolderBtn = null, mode, onPick = null, onActivate = null, onRender = null }) {
+    const b = { folder: '', selectedId: null, store: null, listEl, pathEl, searchEl, sortEl, newFolderBtn, mode, onPick, onActivate, onRender };
+    b.highlight = null; // { saveId } | { folderPath }: row to flash after the next render
+    // One-line status under the path bar ("Moved ... into ...").
+    b.noteEl = document.createElement('div');
+    b.noteEl.className = 'saves-note';
+    b.noteEl.setAttribute('aria-live', 'polite');
+    pathEl.after(b.noteEl);
     b.render = () => renderSavesBrowser(b);
     b.openAt = (folder) => { b.folder = folder; searchEl.value = ''; return b.render(); };
     searchEl.addEventListener('input', () => b.render());
     if (newFolderBtn) newFolderBtn.addEventListener('click', () => createFolder(b));
+    enableDragAutoScroll(listEl);
+    if (sortEl) {
+        for (const [value, label] of SAVE_SORTS) sortEl.add(new Option(label, value));
+        sortEl.addEventListener('change', () => {
+            savesSort = sortEl.value;
+            chrome.storage.local.set({ savesSort });
+            b.render();
+        });
+    }
     return b;
+}
+
+/* ---------------- drag and drop into folders ---------------- */
+
+// { kind: 'save', id, folder } | { kind: 'folder', path }, plus `row` (the
+// element being dragged).
+let savesDrag = null;
+
+// Hovering a folder (row or path crumb) this long while dragging opens it, so
+// you can drop inside it or go further down, like a file manager.
+const SPRING_OPEN_MS = 800;
+let springTimer = null;
+let springEl = null;
+
+function cancelSpringOpen() {
+    clearTimeout(springTimer);
+    springTimer = null;
+    if (springEl) springEl.classList.remove('spring-pending');
+    springEl = null;
+}
+
+function endSavesDrag() {
+    cancelSpringOpen();
+    if (savesDrag && savesDrag.row) savesDrag.row.classList.remove('row-dragging');
+    savesDrag = null;
+    document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+    for (const holder of document.querySelectorAll('.drag-source-holder')) holder.replaceChildren();
+}
+
+// Re-rendering the list mid-drag (after a spring open) would remove the row
+// being dragged, and a removed drag source never gets its dragend. Park it in
+// a hidden holder in the same dialog until the drag ends.
+function keepDragSource(b) {
+    const row = savesDrag && savesDrag.row;
+    if (!row || !b.listEl.contains(row)) return;
+    const area = b.listEl.closest('dialog') || document.body;
+    let holder = area.querySelector(':scope > .drag-source-holder');
+    if (!holder) {
+        holder = document.createElement('div');
+        holder.className = 'drag-source-holder';
+        holder.hidden = true;
+        area.appendChild(holder);
+    }
+    holder.appendChild(row);
+}
+
+function makeRowDraggable(row, item) {
+    row.draggable = true;
+    row.addEventListener('dragstart', (e) => {
+        savesDrag = { ...item, row };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.kind);
+        row.classList.add('row-dragging');
+    });
+    row.addEventListener('dragend', endSavesDrag);
+}
+
+// Fallback in case a drag ends without a dragend reaching us: the first mouse
+// move with no button held means no drag is going on.
+document.addEventListener('mousemove', (e) => {
+    if (savesDrag && e.buttons === 0) endSavesDrag();
+});
+
+// While dragging a save/folder, scroll the list when the pointer is near its
+// top or bottom edge, or anywhere above/below it in the dialog (the mouse
+// wheel doesn't work during a drag). Faster the closer to / further past the
+// edge. dragover keeps firing while the pointer is still, and the loop stops
+// once it stops firing (drop, drag end, or pointer back in the middle).
+const AUTOSCROLL_ZONE_PX = 48;
+const AUTOSCROLL_MAX_PX_PER_FRAME = 18;
+
+function enableDragAutoScroll(listEl) {
+    const area = listEl.closest('dialog') || listEl.parentElement;
+    let speed = 0;          // px per frame, negative = up
+    let lastOver = 0;
+    let running = false;
+
+    const step = () => {
+        if (!speed || Date.now() - lastOver > 150) { running = false; speed = 0; return; }
+        listEl.scrollTop += speed;
+        requestAnimationFrame(step);
+    };
+
+    area.addEventListener('dragover', (e) => {
+        if (!savesDrag) return;
+        const r = listEl.getBoundingClientRect();
+        const fromTop = e.clientY - r.top;
+        const fromBottom = r.bottom - e.clientY;
+        const strength = d => Math.min(1, (AUTOSCROLL_ZONE_PX - d) / AUTOSCROLL_ZONE_PX);
+        if (fromTop < AUTOSCROLL_ZONE_PX) speed = -Math.ceil(strength(fromTop) * AUTOSCROLL_MAX_PX_PER_FRAME);
+        else if (fromBottom < AUTOSCROLL_ZONE_PX) speed = Math.ceil(strength(fromBottom) * AUTOSCROLL_MAX_PX_PER_FRAME);
+        else speed = 0;
+        lastOver = Date.now();
+        if (speed && !running) { running = true; requestAnimationFrame(step); }
+    });
+}
+
+function canDropInto(path) {
+    const d = savesDrag;
+    if (!d || path === AUTOSAVE_FOLDER) return false;
+    if (d.kind === 'save') return d.folder !== path;
+    // A folder can't go into itself, a subfolder of itself, or where it already is.
+    return !isInFolderTree(path, d.path) && parentFolder(d.path) !== path;
+}
+
+// Whether hovering folder `path` while dragging should open it.
+function canSpringOpen(b, path) {
+    const d = savesDrag;
+    if (!d || path === AUTOSAVE_FOLDER || path === b.folder) return false;
+    return !(d.kind === 'folder' && isInFolderTree(path, d.path)); // not into itself
+}
+
+// `el` (a folder row or path crumb) accepts drops into folder `path`, and
+// opens that folder when hovered for SPRING_OPEN_MS.
+function makeFolderDropTarget(el, b, path) {
+    el.addEventListener('dragover', (e) => {
+        if (canSpringOpen(b, path) && springEl !== el) {
+            cancelSpringOpen();
+            springEl = el;
+            el.classList.add('spring-pending');
+            springTimer = setTimeout(() => {
+                cancelSpringOpen();
+                if (!canSpringOpen(b, path)) return;
+                keepDragSource(b);
+                b.searchEl.value = '';
+                b.folder = path;
+                b.render();
+            }, SPRING_OPEN_MS);
+        }
+        if (!canDropInto(path)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        el.classList.add('drop-target');
+    });
+    el.addEventListener('dragleave', (e) => {
+        if (el.contains(e.relatedTarget)) return;
+        el.classList.remove('drop-target');
+        if (springEl === el) cancelSpringOpen();
+    });
+    el.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const d = savesDrag;
+        const ok = d && canDropInto(path);
+        endSavesDrag();
+        if (!ok) return;
+        if (d.kind === 'save') moveSaveToFolder(b, d.id, path);
+        else moveFolderInto(b, d.path, path);
+    });
+}
+
+// After a move: open the destination, flash the moved row there and say what
+// happened.
+function showMovedInto(b, target, highlight, message) {
+    b.searchEl.value = '';
+    b.folder = target;
+    b.highlight = highlight;
+    b.render();
+    showSavesNote(b, message);
+}
+
+function showSavesNote(b, text) {
+    clearTimeout(b.noteTimer);
+    b.noteEl.textContent = text;
+    b.noteEl.classList.add('visible');
+    b.noteTimer = setTimeout(() => b.noteEl.classList.remove('visible'), 4000);
+}
+
+function folderLabel(path) {
+    return path ? `📁 ${path}` : 'the top level';
+}
+
+function folderWhere(path) {
+    return path ? `"${path}"` : 'the top level';
+}
+
+// A save with the same name already in the target is replaced after confirming,
+// like saving over it.
+async function moveSaveToFolder(b, saveId, target) {
+    const store = await readSavesStore();
+    const save = store.saves.find(s => s.id === saveId);
+    if (!save || save.folder === target) return;
+    const clash = store.saves.find(s => s !== save && s.folder === target && s.name === save.name);
+    if (clash) {
+        if (!confirm(`"${save.name}" already exists in ${folderWhere(target)}.\nDo you want to replace it?`)) return;
+        store.saves = store.saves.filter(s => s !== clash);
+        if (store.lastSavedId === clash.id) store.lastSavedId = save.id;
+        if (store.lastSessionSaveId === clash.id) store.lastSessionSaveId = save.id;
+    }
+    save.folder = target;
+    await writeSavesStore(store);
+    showMovedInto(b, target, { saveId: save.id }, `Moved "${save.name}" into ${folderLabel(target)}.`);
+}
+
+// Moves the folder with its subfolders and saves. Refused if the target
+// already has a folder with that name.
+async function moveFolderInto(b, path, target) {
+    const name = path.split('/').pop();
+    const newPath = target ? `${target}/${name}` : name;
+    const store = await readSavesStore();
+    if (!store.folders.includes(path)) return;
+    if (store.folders.includes(newPath)) {
+        alert(`${folderWhere(target)} already has a folder named "${name}".`);
+        return;
+    }
+    const remap = p => isInFolderTree(p, path) ? newPath + p.slice(path.length) : p;
+    store.folders = store.folders.map(remap);
+    for (const s of store.saves) s.folder = remap(s.folder);
+    await writeSavesStore(store);
+    lastSaveFolder = remap(lastSaveFolder);
+    showMovedInto(b, target, { folderPath: newPath }, `Moved folder "${name}" into ${folderLabel(target)}.`);
 }
 
 function makeButton(label, title, onClick, extraClass = '') {
@@ -140,12 +415,16 @@ function renderPathBar(b) {
         crumb.disabled = i === parts.length - 1;
         crumb.addEventListener('click', () => { b.folder = path; b.render(); });
         container.appendChild(crumb);
+        // Disabled buttons get no drag events, so the current folder isn't a
+        // target (dropping there would do nothing anyway).
+        makeFolderDropTarget(crumb, b, path);
     });
 }
 
 function folderRow(b, label, path, meta, onDelete) {
     const row = document.createElement('div');
     row.className = 'load-slot folder-row';
+    row.dataset.folderPath = path;
     row.title = 'Open folder';
     const info = document.createElement('div');
     const name = document.createElement('b');
@@ -166,6 +445,11 @@ function folderRow(b, label, path, meta, onDelete) {
         b.folder = path;
         b.render();
     });
+    if (path !== AUTOSAVE_FOLDER) {
+        row.title = 'Open folder · drop saves or folders here to move them in (hold over it to open it)';
+        makeRowDraggable(row, { kind: 'folder', path });
+        makeFolderDropTarget(row, b, path);
+    }
     return row;
 }
 
@@ -187,12 +471,13 @@ function saveRow(b, save, { showFolder = false, matchNote = '' } = {}) {
         info.appendChild(note);
     }
     row.appendChild(info);
+    row.dataset.saveId = save.id;
+    if (!save.readOnly) makeRowDraggable(row, { kind: 'save', id: save.id, folder: save.folder });
 
     if (b.mode === 'pick') {
         row.classList.add('pick-row');
-        row.dataset.saveId = save.id;
         if (save.id === b.selectedId) row.classList.add('picked');
-        row.title = 'Click to select, double-click to save over it';
+        row.title = 'Click to select, double-click to save over it, drag onto a folder to move it';
         row.addEventListener('click', () => { if (b.onPick) b.onPick(save); });
         row.addEventListener('dblclick', () => { if (b.onActivate) b.onActivate(save); });
         return row;
@@ -201,9 +486,9 @@ function saveRow(b, save, { showFolder = false, matchNote = '' } = {}) {
     const actions = document.createElement('div');
     actions.className = 'load-slot-actions';
     actions.append(
-        makeButton('Load', 'Replace all open tabs with this save', () => loadSave(save, true)),
         makeButton('Add', 'Open this save alongside your current tabs', () => loadSave(save, false)),
         makeButton('Export JSON', 'Download this save as a .json file (loadable with Upload JSON)', () => exportSave(save)),
+        makeButton('Load', 'Replace all open tabs with this save', () => loadSave(save, true)),
     );
     if (!save.readOnly) {
         actions.appendChild(makeButton('Delete', 'Delete this save', () => deleteSave(b, save), 'danger-btn'));
@@ -234,7 +519,21 @@ function emptyNote(list, text) {
 
 async function renderSavesBrowser(b) {
     await renderSavesBrowserInner(b);
+    applySavesHighlight(b);
     if (b.onRender) b.onRender();
+}
+
+// Flash the row named by b.highlight (set after a move) and scroll it into view.
+function applySavesHighlight(b) {
+    const h = b.highlight;
+    b.highlight = null;
+    if (!h) return;
+    const row = Array.from(b.listEl.querySelectorAll('.load-slot')).find(r =>
+        (h.saveId && r.dataset.saveId === h.saveId) || (h.folderPath && r.dataset.folderPath === h.folderPath));
+    if (!row) return;
+    row.classList.add('just-moved');
+    row.scrollIntoView({ block: 'nearest' });
+    setTimeout(() => row.classList.remove('just-moved'), 1600);
 }
 
 async function renderSavesBrowserInner(b) {
@@ -243,6 +542,7 @@ async function renderSavesBrowserInner(b) {
     const autosaves = b.mode === 'manage' ? await getAutosaves() : [];
     const list = b.listEl;
     const q = b.searchEl.value.trim().toLowerCase();
+    if (b.sortEl) b.sortEl.value = savesSort; // the other dialog may have changed it
     list.replaceChildren();
 
     // The folder we were in may have been deleted.
@@ -253,13 +553,15 @@ async function renderSavesBrowserInner(b) {
         // Search: flat results from every folder (and autosaves).
         b.pathEl.textContent = `Search results for "${q}"`;
         if (b.newFolderBtn) b.newFolderBtn.disabled = true;
-        const results = [...store.saves, ...autosaves]
-            .map(s => ({ s, m: searchMatch(s, q) }))
-            .filter(r => r.m.hit)
-            .sort((x, y) => (y.s.at || 0) - (x.s.at || 0));
-        const folderHits = store.folders.filter(f => f.split('/').pop().toLowerCase().includes(q));
+        const matches = new Map();
+        for (const s of [...store.saves, ...autosaves]) {
+            const m = searchMatch(s, q);
+            if (m.hit) matches.set(s, m);
+        }
+        const results = sortSaves([...matches.keys()]);
+        const folderHits = sortFolders(store, store.folders.filter(f => f.split('/').pop().toLowerCase().includes(q)));
         for (const f of folderHits) list.appendChild(folderRow(b, f, f, 'folder', null));
-        for (const { s, m } of results) list.appendChild(saveRow(b, s, { showFolder: true, matchNote: m.note }));
+        for (const s of results) list.appendChild(saveRow(b, s, { showFolder: true, matchNote: matches.get(s).note }));
         if (!results.length && !folderHits.length) emptyNote(list, 'No saves match.');
         return;
     }
@@ -268,7 +570,7 @@ async function renderSavesBrowserInner(b) {
 
     if (b.folder === AUTOSAVE_FOLDER) {
         if (b.newFolderBtn) b.newFolderBtn.disabled = true;
-        for (const s of autosaves) list.appendChild(saveRow(b, s));
+        for (const s of sortSaves(autosaves)) list.appendChild(saveRow(b, s));
         if (!autosaves.length) emptyNote(list, 'No autosaves yet. Turn on the autosave checkbox on the board.');
         return;
     }
@@ -277,15 +579,14 @@ async function renderSavesBrowserInner(b) {
     if (b.folder === '' && autosaves.length) {
         list.appendChild(folderRow(b, 'Autosaves', AUTOSAVE_FOLDER, `${autosaves.length} autosave(s) · read-only`, null));
     }
-    for (const f of childFolders(store, b.folder)) {
+    for (const f of sortFolders(store, childFolders(store, b.folder))) {
         const saves = store.saves.filter(s => isInFolderTree(s.folder, f)).length;
         const subs = store.folders.filter(x => x !== f && isInFolderTree(x, f)).length;
         list.appendChild(folderRow(b, f.split('/').pop(), f,
             `${saves} save(s)${subs ? `, ${subs} subfolder(s)` : ''}`,
             b.mode === 'manage' ? () => deleteFolder(b, f) : null));
     }
-    const here = store.saves.filter(s => s.folder === b.folder).sort((x, y) => (y.at || 0) - (x.at || 0));
-    for (const s of here) list.appendChild(saveRow(b, s));
+    for (const s of sortSaves(store.saves.filter(s => s.folder === b.folder))) list.appendChild(saveRow(b, s));
     if (!list.children.length) {
         emptyNote(list, b.folder ? 'This folder is empty.' : "No internal saves yet. Use 'Save (Internal)' or Ctrl+S.");
     }
@@ -297,6 +598,7 @@ const loadBrowser = createSavesBrowser({
     listEl: document.getElementById('saves-list'),
     pathEl: document.getElementById('saves-path'),
     searchEl: document.getElementById('saves-search'),
+    sortEl: document.getElementById('saves-sort'),
     newFolderBtn: document.getElementById('new-folder-btn'),
     mode: 'manage',
 });
@@ -316,16 +618,22 @@ async function openLoadDialog() {
 // its name, then Save. If the name already exists in that folder, the save
 // is replaced after confirming. Double-clicking a save saves over it.
 //
-// It opens in the folder you last saved to. If your last action replaced a
-// save, that save is pre-selected (so saving over it again is one step);
-// otherwise the default new name is filled in. ("lastSaveAction")
+// Starting name and folder depend on what is being saved (`kind`):
+//   "session" (Ctrl+S, Save (Internal)): the last whole-session save, so
+//       saving over it again is one step (lastSessionSaveId; for older stores
+//       without it, the newest save with more than one window). Without one,
+//       the dated default name in the folder you last saved to.
+//   "window" (a window's save button, the selection toolbar): always the
+//       window's own name (defaultName), in the folder you last saved to.
+// Autosaves aren't in store.saves, so they are never used.
 
-const saveDialogState = { windows: null, defaultName: '' };
+const saveDialogState = { windows: null, defaultName: '', kind: 'window' };
 
 const pickBrowser = createSavesBrowser({
     listEl: document.getElementById('pick-list'),
     pathEl: document.getElementById('pick-path'),
     searchEl: document.getElementById('pick-search'),
+    sortEl: document.getElementById('pick-sort'),
     newFolderBtn: document.getElementById('save-new-folder-btn'),
     mode: 'pick',
     onPick: (save) => selectSaveInDialog(save),
@@ -364,27 +672,40 @@ function updateSaveDialog() {
         : `Saving in ${where}.`;
 }
 
-// Open the dialog to store `windows` (whole session or one window).
-async function openSaveDialog(windows, defaultName) {
+// The save Ctrl+S should offer to save over, or null.
+function lastSessionSave(store) {
+    const byId = store.saves.find(s => s.id === store.lastSessionSaveId);
+    if (byId) return byId;
+    if (store.lastSessionSaveId) return null; // it was deleted
+    // Stores from before lastSessionSaveId: newest multi-window save.
+    return store.saves
+        .filter(s => (s.windows || []).length > 1)
+        .reduce((best, s) => (!best || (s.at || 0) > (best.at || 0) ? s : best), null);
+}
+
+// Open the dialog to store `windows`. kind: "session" or "window" (see above).
+async function openSaveDialog(windows, defaultName, { kind = 'window' } = {}) {
     if (!windows || !windows.length) {
         alert('Nothing to save.');
         return;
     }
     const store = await readSavesStore();
-    const { lastSaveAction } = await chrome.storage.local.get('lastSaveAction');
     const lastSaved = store.saves.find(s => s.id === store.lastSavedId) || null;
+    const lastFolder = lastSaved ? lastSaved.folder : (store.folders.includes(lastSaveFolder) ? lastSaveFolder : '');
+    const sessionSave = kind === 'session' ? lastSessionSave(store) : null;
 
     saveDialogState.windows = windows;
     saveDialogState.defaultName = defaultName || '';
+    saveDialogState.kind = kind;
     document.getElementById('save-dialog-title').textContent =
         windows.length === 1 ? 'Save window internally' : 'Save session internally';
     document.getElementById('save-summary').textContent =
         `${windows.length} window${windows.length === 1 ? '' : 's'}, ${countTabs(windows)} tab(s)`;
 
-    // Start where you last saved; pre-select the last save if you last replaced one.
+    // A matching name pre-selects that save (updateSaveDialog).
     const nameInput = document.getElementById('save-name');
-    nameInput.value = lastSaveAction === 'overwrite' && lastSaved ? lastSaved.name : saveDialogState.defaultName;
-    const startFolder = lastSaved ? lastSaved.folder : (store.folders.includes(lastSaveFolder) ? lastSaveFolder : '');
+    nameInput.value = sessionSave ? sessionSave.name : saveDialogState.defaultName;
+    const startFolder = sessionSave ? sessionSave.folder : lastFolder;
 
     const dialog = document.getElementById('save-dialog');
     dialog.showModal();
@@ -405,22 +726,21 @@ async function submitSaveDialog() {
     const windows = saveDialogState.windows;
     const store = await readSavesStore();
     const existing = store.saves.find(s => s.folder === folder && s.name === name);
-    let action;
+    let savedId;
     if (existing) {
         const where = folder ? `"${folder}"` : 'the top level';
         if (!confirm(`"${name}" already exists in ${where}.\nDo you want to replace it?`)) return;
         existing.windows = windows;
         existing.at = Date.now();
-        store.lastSavedId = existing.id;
-        action = 'overwrite';
+        savedId = existing.id;
     } else {
-        const id = newSaveId();
-        store.saves.push({ id, name, folder, at: Date.now(), windows });
-        store.lastSavedId = id;
-        action = 'new';
+        savedId = newSaveId();
+        store.saves.push({ id: savedId, name, folder, at: Date.now(), windows });
     }
+    store.lastSavedId = savedId;
+    if (saveDialogState.kind === 'session') store.lastSessionSaveId = savedId;
     await writeSavesStore(store);
-    await chrome.storage.local.set({ lastSaveAction: action });
+    chrome.storage.local.remove('lastSaveAction').catch(() => { }); // no longer used
     lastSaveFolder = folder;
     saveDialogState.windows = null;
     dialog.close();

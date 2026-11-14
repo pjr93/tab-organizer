@@ -385,10 +385,26 @@
             background: #b32b2b;
         }
 
-        .group-delete-btn {
+        /* Window bar: the window box's buttons in one row on the title's row
+           (same vertical position as .editable-title), right-aligned, shown
+           while the box is hovered. Order: force load, download, save, +,
+           minimize, ×. */
+        .window-bar {
             position: absolute;
-            top: 6px;
-            right: -11px;
+            top: 0;
+            right: 12px;
+            transform: translateY(-50%);
+            display: none;
+            align-items: center;
+            gap: 4px;
+            z-index: 21; /* above the title (20) */
+        }
+
+        .child-grid:hover>.window-bar {
+            display: flex;
+        }
+
+        .group-delete-btn {
             width: 22px;
             height: 22px;
             background-color: black;
@@ -400,27 +416,17 @@
             font-size: 16px;
             line-height: 20px;
             user-select: none;
-            display: none;
+            display: flex;
             align-items: center;
             justify-content: center;
             padding: 0;
-            z-index: 10;
-            transition: opacity 0.2s ease;
         }
 
         .group-delete-btn:hover {
             background: #b32b2b;
         }
 
-        .child-grid:hover>.group-delete-btn {
-            display: flex;
-            opacity: 1;
-        }
-
         .group-save-btn {
-            position: absolute;
-            top: 50px;
-            right: -11px;
             width: 22px;
             height: 22px;
             background-color: black;
@@ -432,12 +438,10 @@
             font-size: 16px;
             line-height: 20px;
             user-select: none;
-            display: none;
+            display: flex;
             align-items: center;
             justify-content: center;
             padding: 0;
-            z-index: 10;
-            transition: opacity 0.2s ease;
         }
 
         .group-save-btn svg {
@@ -450,9 +454,82 @@
             /* optionally give it a distinct hover color instead of red */
         }
 
-        .child-grid:hover>.group-save-btn {
+        /* Force load this window's tabs (force-load.js) */
+        .group-force-load-btn:hover {
+            background: #9c6813;
+        }
+
+        .group-minimize-btn:hover {
+            background: #444;
+            color: white;
+        }
+
+        /* Minimized window box (board only): tabs and the new-tab tile are
+           hidden; a one-line summary (favicons + tab count) takes their place. */
+        .child-grid.minimized > .grid-item,
+        .child-grid.minimized > .new-tab-tile {
+            display: none;
+        }
+
+        .minimized-summary {
+            grid-column: 1 / -1;
             display: flex;
-            opacity: 1;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            height: 30px;
+            padding: 0 8px;
+            box-sizing: border-box;
+            border: 2px dashed #444;
+            border-radius: 8px;
+            color: #aaa;
+            font-size: 14px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .minimized-summary:hover {
+            background: #ffffff0d;
+            color: white;
+        }
+
+        /* Some of the hidden tabs are selected: same colour as a selected tab
+           (.grid-item.selected), so the selection is still visible. */
+        .child-grid.minimized:has(> .grid-item.selected) > .minimized-summary {
+            background-color: rgb(189, 132, 132);
+            border-style: solid;
+            border-color: #000;
+            color: white;
+        }
+
+        /* Some of the hidden tabs are playing sound ("audio glow" setting):
+           the same blue pulse as such a tab (.grid-item.audio-glow). The
+           force-load rule below comes later so it wins, as it does on tabs. */
+        .child-grid.minimized:has(> .grid-item.audio-glow) > .minimized-summary {
+            border-style: solid;
+            animation: audioBorder 3s infinite ease-in-out, audioRing 3s infinite ease-in-out;
+        }
+
+        /* Some of the hidden tabs are being force loaded: the same purple
+           pulse as a loading tab (.grid-item.force-loading). Works together
+           with the selected colour above (that one only sets the background). */
+        .child-grid.minimized:has(> .grid-item.force-loading) > .minimized-summary {
+            border-style: solid;
+            animation: forceLoadBorder 3s infinite ease-in-out, forceLoadRing 3s infinite ease-in-out;
+        }
+
+        .minimized-icons {
+            display: flex;
+            gap: 4px;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .minimized-icons img {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            flex: 0 0 auto;
         }
 
 
@@ -468,9 +545,6 @@
         }
 
         .plus-tab-btn {
-            position: absolute;
-            top: 28px;
-            right: -11px;
             width: 22px;
             height: 22px;
             border-radius: 10%;
@@ -479,24 +553,43 @@
             border: 2px solid #666;
             color: #666;
             cursor: pointer;
-            display: none;
+            display: flex;
             align-items: center;
             justify-content: center;
 
             font-size: 16px;
             line-height: 20px;
             padding: 0;
-            z-index: 10;
-            transition: opacity 0.2s ease;
         }
 
         .plus-tab-btn:hover {
             background-color: #13589c;
         }
 
-        .child-grid:hover>.plus-tab-btn {
+        /* "+" tile in the slot after a window's last tab: styled like the
+           new-window button (.new-window-btn), at a tab's height, with the
+           window title's former colors (#222, black on hover). */
+        .new-tab-tile {
+            height: 30px;
+            min-height: 30px;
+            min-width: 0;
+            align-self: center;
+            box-sizing: border-box;
+            background-color: #1E1E1E;
+            border: 2px solid #000;
+            border-radius: 8px;
+            color: #666;
+            font-size: 16px;
+            font-weight: bold;
             display: flex;
-            opacity: 1;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .new-tab-tile:hover {
+            background-color: #000;
         }
 
         .load-file-btn {
@@ -557,13 +650,14 @@
         .editable-title {
             position: absolute;
             top: 0px;
-            /* aligns with the top edge */
-            left: 50%;
-            /* move to horizontal center */
-            transform: translateX(-50%) translateY(-50%);
-            /* center horizontally, pull up 50% of its height */
+            /* sits on the top edge, lined up with the tabs' left side */
+            left: 12px;
+            /* pull up 50% of its height */
+            transform: translateY(-50%);
+            /* grow with the text, to the right only (left edge stays put) */
+            field-sizing: content;
 
-            background: #222;
+            background: black;
             color: white;
             padding: 4px 12px;
 
@@ -574,9 +668,10 @@
             cursor: text;
             user-select: text;
             min-width: 200px;
-            max-width: 380px;
+            /* never past the box, leaving room for the window bar (6 buttons) */
+            max-width: min(380px, calc(100% - 196px));
             max-height: 25px;
-            text-align: center;
+            text-align: left;
             box-sizing: border-box;
             box-shadow: 0 1px 6px rgb(0 0 0 / 0.8);
             /* Optional: border for clarity */
@@ -588,7 +683,7 @@
         }
 
         .editable-title:hover {
-            background-color: #000;
+            background-color: #292929;
         }
 
         /* Container for grouping these buttons */
@@ -659,6 +754,50 @@
 
         .active-tab-glow {
             animation: glowPulse 2s infinite ease-in-out;
+        }
+
+        /* Tabs playing sound ("audio glow" setting): the border pulses blue
+           with a thin ring, every 3s. On the active tab too, the border pulse
+           runs alongside the active glow (which keeps the box-shadow). */
+        @keyframes audioBorder {
+            0%, 100% { border-color: #0d3a66; }
+            50%      { border-color: #4fb3ff; }
+        }
+
+        @keyframes audioRing {
+            0%, 100% { box-shadow: 0 0 0 0 #2196F300; }
+            50%      { box-shadow: 0 0 0 2px #2196F399, 0 0 10px #2196F3cc; }
+        }
+
+        .grid-item.audio-glow {
+            animation: audioBorder 3s infinite ease-in-out, audioRing 3s infinite ease-in-out;
+        }
+
+        .grid-item.audio-glow.active-tab-glow {
+            animation: glowPulse 2s infinite ease-in-out, audioBorder 3s infinite ease-in-out;
+        }
+
+        /* Tabs queued or loading in a force load (force-load.js): the same
+           3s border + ring pulse as the audio glow, in purple. Wins over the
+           audio glow (force load pauses the media anyway). */
+        @keyframes forceLoadBorder {
+            0%, 100% { border-color: #3d1066; }
+            50%      { border-color: #b45cff; }
+        }
+
+        @keyframes forceLoadRing {
+            0%, 100% { box-shadow: 0 0 0 0 #9c27b000; }
+            50%      { box-shadow: 0 0 0 2px #9c27b099, 0 0 10px #b45cffcc; }
+        }
+
+        .grid-item.force-loading,
+        .grid-item.force-loading.audio-glow {
+            animation: forceLoadBorder 3s infinite ease-in-out, forceLoadRing 3s infinite ease-in-out;
+        }
+
+        .grid-item.force-loading.active-tab-glow,
+        .grid-item.force-loading.audio-glow.active-tab-glow {
+            animation: glowPulse 2s infinite ease-in-out, forceLoadBorder 3s infinite ease-in-out;
         }
 
         /* Keep file input hidden */
@@ -903,6 +1042,69 @@
             cursor: pointer;
         }
 
+        .saves-sort {
+            background: #111;
+            color: white;
+            border: 1px solid #666;
+            border-radius: 6px;
+            padding: 6px 4px;
+            font-size: 14px;
+        }
+
+        /* Dragging saves/folders into folders (saves.js) */
+        .load-slot.row-dragging {
+            opacity: 0.4;
+        }
+
+        .load-slot.drop-target,
+        .crumb.drop-target {
+            outline: 2px dashed #2196F3;
+            background: #2196F322;
+            border-radius: 6px;
+        }
+
+        /* Hovering a folder while dragging: it fills up blue over 0.8s
+           (SPRING_OPEN_MS in saves.js), then opens. */
+        @keyframes springFill {
+            from { background-size: 0% 100%; }
+            to   { background-size: 100% 100%; }
+        }
+
+        .load-slot.spring-pending,
+        .crumb.spring-pending {
+            background-image: linear-gradient(#2196F355, #2196F355);
+            background-repeat: no-repeat;
+            animation: springFill 0.8s linear forwards;
+        }
+
+        /* The row just moved into this folder. */
+        @keyframes justMoved {
+            0%   { background: #2196F366; }
+            100% { background: transparent; }
+        }
+
+        .load-slot.just-moved {
+            animation: justMoved 1.6s ease-out;
+            border-radius: 6px;
+        }
+
+        /* "Moved ... into ..." line under the path bar. */
+        .saves-note {
+            font-size: 13px;
+            color: #8ab4f8;
+            min-height: 0;
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 0.2s, max-height 0.2s;
+        }
+
+        .saves-note.visible {
+            max-height: 40px;
+            opacity: 1;
+            margin: -4px 0 8px 0;
+        }
+
         .folder-row:hover {
             background: #ffffff0d;
         }
@@ -954,10 +1156,6 @@
         }
 
         /* Per-window "save internally" button sits below the download button */
-        .group-save-internal-btn {
-            top: 72px;
-        }
-
         /* Dark purple, same darkness as the other buttons' hover colours
            (#13589c blue, #9c6813 orange) */
         .group-save-internal-btn:hover {

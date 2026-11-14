@@ -17,6 +17,9 @@
     <button id="add-btn" class="state-btn" data-hint="Open a JSON file's windows alongside the current ones">Add JSON</button>
     <input type="file" id="upload-file-input" accept=".json" />
     <input type="file" id="add-file-input" accept=".json" />
+    <button id="minimize-all-btn" class="state-btn" data-hint="Minimize every window box on the board (or expand them all if they're all minimized). The browser windows aren't affected.">Minimize all</button>
+    <button id="force-load-btn" class="state-btn" data-hint="Load every unloaded tab in the background, a few at a time. Videos are paused and a screenshot is taken.">Load all tabs</button>
+    <button id="pause-all-btn" class="state-btn" data-hint="Pause every video and audio player in all open tabs (tabs stay open)">Pause all media</button>
     <!-- Options dropdown. -->
     <div class="settings">
         <button type="button" id="settings-btn" class="state-btn" aria-expanded="false" aria-controls="settings-panel"
@@ -31,8 +34,17 @@
             <label class="settings-option" data-hint="Hovering a tab shows its title and address">
                 <input type="checkbox" id="tab-tooltip"> preview text &amp; link
             </label>
-            <label class="settings-option" data-hint="Hovering a tab shows a screenshot of it. Tabs without one are loaded muted in a small window and captured.">
+            <label class="settings-option" data-hint="Hovering a tab shows a screenshot of it, taken when you last viewed it (or when Load all tabs loaded it).">
                 <input type="checkbox" id="full-preview"> preview screenshot
+            </label>
+            <label class="settings-option" data-hint="Tabs playing sound get a pulsing blue border (stops when muted)">
+                <input type="checkbox" id="audio-glow"> audio glow
+            </label>
+            <label class="settings-option" data-hint="Load all tabs: the longest it waits for each page to finish loading (ads and trackers included) before taking its screenshot and moving on, in seconds">
+                load timeout seconds <input type="number" id="force-load-timeout" min="1" step="1">
+            </label>
+            <label class="settings-option" data-hint="Load all tabs: how many tabs load at the same time (1–32). Higher is faster but uses more memory and CPU.">
+                parallel loads <input type="number" id="force-load-parallel" min="1" max="32" step="1">
             </label>
             <label class="settings-option" data-hint="Show what things do in the line next to the title">
                 <input type="checkbox" id="hints-enabled"> hints
@@ -60,6 +72,7 @@
             <p id="save-summary" class="load-slot-meta"></p>
             <div class="saves-toolbar">
                 <input id="pick-search" type="search" placeholder="Search saves, tab titles and URLs…" autocomplete="off">
+                <select id="pick-sort" class="saves-sort" aria-label="Sort by"></select>
                 <button type="button" id="save-new-folder-btn" class="state-btn">New folder</button>
             </div>
             <div id="pick-path"></div>
@@ -79,6 +92,7 @@
         <h3>Internal saves</h3>
         <div class="saves-toolbar">
             <input id="saves-search" type="search" placeholder="Search saves, tab titles and URLs…" autocomplete="off">
+            <select id="saves-sort" class="saves-sort" aria-label="Sort by"></select>
             <button type="button" id="new-folder-btn" class="state-btn">New folder</button>
         </div>
         <div id="saves-path"></div>

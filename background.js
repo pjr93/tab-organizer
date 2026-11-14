@@ -1,4 +1,4 @@
-importScripts("shared.js"); // APP_URL, isBoardTab, isOwnPage, serializeTabGroups
+importScripts("shared.js", "media-control.js", "force-load.js"); // shared.js: APP_URL, isBoardTab, isOwnPage, serializeTabGroups; media-control.js: pausing media; force-load.js: force load worker
 
 function isBoardUrl(url) {
   return typeof url === "string" && url.startsWith(APP_URL);
@@ -102,7 +102,8 @@ function scheduleAutosave() {
 
 async function runAutosave() {
   autosaveTimer = null;
-  const { autosaveEnabled, titles = {}, windowOrder = [] } = await chrome.storage.local.get(["autosaveEnabled", "titles", "windowOrder"]);
+  const { autosaveEnabled, titles = {}, windowOrder = [], minimizedWindows = {} } =
+    await chrome.storage.local.get(["autosaveEnabled", "titles", "windowOrder", "minimizedWindows"]);
   if (!autosaveEnabled) return;
 
   // The board sets this while restoring, so we don't save a half-built session.
@@ -116,7 +117,7 @@ async function runAutosave() {
   // Save in the board's window order (windows it hasn't seen yet go last).
   const rank = id => { const i = windowOrder.indexOf(id); return i === -1 ? Infinity : i; };
   windows.sort((a, b) => rank(a.id) - rank(b.id));
-  const saved = serializeTabGroups(windows.map(w => w.tabs || []), titles);
+  const saved = serializeTabGroups(windows.map(w => w.tabs || []), titles, minimizedWindows);
   if (!saved.some(w => w.tabs.some(t => !isBoardTab(t)))) return; // nothing worth saving
   await chrome.storage.local.set({ autoSave: saved, autoSavedAt: Date.now() });
 }
@@ -129,9 +130,10 @@ chrome.runtime.onStartup.addListener(async () => {
   }
 });
 
-// Window titles and order are edited on the board; include them in the next autosave.
+// Window titles, order and minimized boxes are edited on the board; include
+// them in the next autosave.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && (changes.titles || changes.windowOrder)) scheduleAutosave();
+  if (area === "local" && (changes.titles || changes.windowOrder || changes.minimizedWindows)) scheduleAutosave();
 });
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -143,12 +145,14 @@ chrome.runtime.onMessage.addListener((message) => {
 /* ------------------------------------------------------------------ */
 // Window ids change when the browser restarts, so the id-keyed `titles` map
 // and `windowOrder` can't find the restored windows. We keep
-// `titleSnapshot`: one { title, urls } entry per window, in board order. On
+// `titleSnapshot`: one { title, minimized, urls } entry per window, in board
+// order (`minimized` = the window's box is minimized on the board). On
 // startup, each restored window is matched to an entry by its tab URLs:
 //   1. same set of URLs -> match;
 //   2. otherwise the entry sharing the most URLs, if that's at least half of
 //      the window's tabs.
-// A matched window gets the entry's title (if it had one), and the board
+// A matched window gets the entry's title (if it had one) and minimized box
+// state (entries from before that existed have no key: expanded), and the board
 // order is rebuilt from the entries' positions; unmatched windows go last.
 // Windows come back over a few seconds, so matching re-runs after tab/window
 // events until every entry is matched or TITLE_MATCH_WINDOW_MS has passed.
@@ -185,18 +189,20 @@ async function runTitleWork() {
 }
 
 async function writeTitleSnapshot() {
-  const { titles = {}, windowOrder = [] } = await chrome.storage.local.get(["titles", "windowOrder"]);
+  const { titles = {}, windowOrder = [], minimizedWindows = {} } =
+    await chrome.storage.local.get(["titles", "windowOrder", "minimizedWindows"]);
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
   const rank = id => { const i = windowOrder.indexOf(id); return i === -1 ? Infinity : i; };
   windows.sort((a, b) => rank(a.id) - rank(b.id));
   const titleSnapshot = windows
-    .map(w => ({ title: titles[w.id] || "", urls: windowUrls(w) }))
+    .map(w => ({ title: titles[w.id] || "", minimized: !!minimizedWindows[w.id], urls: windowUrls(w) }))
     .filter(e => e.urls.length);
   await chrome.storage.local.set({ titleSnapshot });
 }
 
 async function matchRestoredWindows(titleMatch) {
-  const { titles = {}, windowOrder = [] } = await chrome.storage.local.get(["titles", "windowOrder"]);
+  const { titles = {}, windowOrder = [], minimizedWindows = {} } =
+    await chrome.storage.local.get(["titles", "windowOrder", "minimizedWindows"]);
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
   const alreadyMatched = new Set(titleMatch.matched.map(m => m.winId));
 
@@ -218,6 +224,7 @@ async function matchRestoredWindows(titleMatch) {
   // Pair greedily: each window and each entry is used once.
   const usedWins = new Set(), usedEntries = new Set();
   let titlesChanged = false;
+  let minimizedChanged = false;
   for (const { win, i } of pairs) {
     if (usedWins.has(win.id) || usedEntries.has(i)) continue;
     usedWins.add(win.id);
@@ -226,6 +233,7 @@ async function matchRestoredWindows(titleMatch) {
     titleMatch.matched.push({ winId: win.id, index: entry.index });
     // Don't overwrite a title the user already typed this session.
     if (entry.title && !titles[win.id]) { titles[win.id] = entry.title; titlesChanged = true; }
+    if (entry.minimized === true && !minimizedWindows[win.id]) { minimizedWindows[win.id] = true; minimizedChanged = true; }
   }
 
   if (usedEntries.size) {
@@ -241,6 +249,7 @@ async function matchRestoredWindows(titleMatch) {
       .filter((id, pos, all) => live.has(id) && !inMatched.has(id) && all.indexOf(id) === pos);
     const update = { windowOrder: [...matchedIds, ...rest] };
     if (titlesChanged) update.titles = titles;
+    if (minimizedChanged) update.minimizedWindows = minimizedWindows;
     await chrome.storage.local.set(update);
   }
 
@@ -257,7 +266,7 @@ chrome.runtime.onStartup.addListener(async () => {
   if (!titleSnapshot.length) return;
   await chrome.storage.session.set({
     titleMatch: {
-      entries: titleSnapshot.map((e, index) => ({ title: e.title || "", urls: e.urls || [], index })),
+      entries: titleSnapshot.map((e, index) => ({ title: e.title || "", minimized: e.minimized === true, urls: e.urls || [], index })),
       matched: [],
       until: Date.now() + TITLE_MATCH_WINDOW_MS,
     },
@@ -272,9 +281,9 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason !== "chrome_update") scheduleTitleWork();
 });
 
-// A title edited or a window moved on the board: refresh the snapshot.
+// A title edited, a window moved or a box minimized on the board: refresh the snapshot.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && (changes.titles || changes.windowOrder)) scheduleTitleWork();
+  if (area === "local" && (changes.titles || changes.windowOrder || changes.minimizedWindows)) scheduleTitleWork();
 });
 
 /* ------------------------------------------------------------------ */
