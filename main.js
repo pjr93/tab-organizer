@@ -560,7 +560,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     plusTabBtn.title = "Add a new tab to this window (in the background)";
     // Shown when hovering the box's empty space (hints.js).
     group.dataset.hint = 'Click empty space here to select all its tabs (Ctrl+click to add/remove, Shift+click for a range) · ' +
-        'Drag it to reorder this window on the board · Drop tabs here to move them into it';
+        'Double-click to minimize/expand · Drag it to reorder this window on the board · Drop tabs here to move them into it';
     plusTabBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         addTabToWindow(windowId);
@@ -585,11 +585,27 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     group.addEventListener('mousedown', e => {
         group.draggable = e.target === group;
     });
-    // Clicking the same empty space (without dragging) selects the window's
-    // tabs, with the same Ctrl/Shift rules as clicking a tab.
+    // Clicking the same empty space (without dragging), or a minimized box's
+    // summary line, selects the window's tabs, with the same Ctrl/Shift rules
+    // as clicking a tab. Double-clicking it minimizes / expands the box.
+    const isBoxSpace = (target) => target === group || !!(target.closest && target.closest('.minimized-summary'));
+    // A double-click is also two clicks; remember the selection from before
+    // the first one so the double-click can put it back.
+    let selectionBeforeClick = null;
     group.addEventListener('click', e => {
-        if (e.target !== group) return; // a tab, button or the title
+        if (!isBoxSpace(e.target)) return; // a tab, button or the title
+        if (e.detail <= 1) selectionBeforeClick = { ids: new Set(selectedTabIds), anchor: lastSelectedIndex };
         handleSelectClick(e, Array.from(group.querySelectorAll('.grid-item')));
+    });
+    group.addEventListener('dblclick', e => {
+        if (!isBoxSpace(e.target) || windowId == null) return;
+        if (selectionBeforeClick) {
+            selectedTabIds.clear();
+            for (const id of selectionBeforeClick.ids) selectedTabIds.add(id);
+            lastSelectedIndex = selectionBeforeClick.anchor;
+            selectionBeforeClick = null;
+        }
+        setWindowsMinimized([windowId], !minimizedWindows[windowId]); // re-renders
     });
     group.addEventListener('dragstart', e => {
         if (e.target !== group) return; // a tab being dragged (bubbled up)
@@ -762,12 +778,12 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
     group.appendChild(windowBar);
 
     // A minimized box hides its tabs (CSS) and shows a one-line summary
-    // instead; clicking the summary expands it again.
+    // instead; double-clicking it (or the box's empty space) expands it again.
     if (minimized) {
         group.classList.add('minimized');
         const summary = document.createElement('div');
         summary.className = 'minimized-summary';
-        summary.dataset.hint = 'Minimized window: click to expand it';
+        summary.dataset.hint = 'Minimized window: double-click to expand it · click to select its tabs';
         const icons = document.createElement('span');
         icons.className = 'minimized-icons';
         for (const tab of items.slice(0, MINIMIZED_ICON_COUNT)) {
@@ -779,11 +795,7 @@ function createGroup(items = [], idx, windowId = null, titleText = '-') {
         const count = document.createElement('span');
         count.textContent = `${items.length} tab${items.length === 1 ? '' : 's'}`;
         summary.append(icons, count);
-        summary.addEventListener('click', (e) => {
-            e.stopPropagation();
-            setWindowsMinimized([windowId], false);
-        });
-        group.appendChild(summary);
+        group.appendChild(summary); // clicks: see the box's click/dblclick handlers
     }
 
     for (const itemObj of items) {
