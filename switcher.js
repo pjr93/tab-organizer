@@ -2,7 +2,7 @@
 // pages where the in-page overlay can't run (chrome:// pages, web store, new
 // tab page, PDFs) or when the page doesn't have keyboard focus.
 // Same controls as the overlay: arrows move, Enter switches, Esc / clicking
-// away cancels, click a row to pick it.
+// away cancels, click a row to pick it (keys changeable on the keybinds page).
 
 const listEl = document.getElementById('list');
 let items = [];
@@ -55,22 +55,31 @@ function highlight() {
     if (cur) cur.scrollIntoView({ block: 'nearest' });
 }
 
+// Keys from keybinds-core.js (changeable on the keybinds page).
+let binds = Keybinds.resolve({});
+const SWITCHER_IDS = Keybinds.idsFor('switcher');
+Keybinds.watch((map) => {
+    binds = map;
+    const d = (id) => Keybinds.describe(binds, id, '—');
+    document.getElementById('hint').textContent =
+        `${d('switcherOlder')} / ${d('switcherNewer')} to move · ${d('switcherCommit')} to switch · ` +
+        `${d('switcherCancel')} to cancel · click to pick`;
+});
+
 window.addEventListener('keydown', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    switch (e.key) {
-        case 'ArrowLeft':
-        case 'ArrowDown':
+    switch (Keybinds.actionFor(e, binds, SWITCHER_IDS)) {
+        case 'switcherOlder':
             move(1);
             break;
-        case 'ArrowRight':
-        case 'ArrowUp':
+        case 'switcherNewer':
             move(-1);
             break;
-        case 'Enter':
+        case 'switcherCommit':
             finish('switcher_commit');
             break;
-        case 'Escape':
+        case 'switcherCancel':
             finish('switcher_cancel');
             break;
     }

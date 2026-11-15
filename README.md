@@ -56,7 +56,17 @@ You can always navigate back to it by clicking the icon on the toolbar at the to
 
 "view history in app" checkbox: when checked, switching activates the tab inside its window but keeps you where you were (e.g. on the board, so you can watch the highlight move). When unchecked, the tab's window comes to the front.
 
-Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing keyboard language. If you have more than one input language and it gets in the way, change the extension's shortcuts at `chrome://extensions/shortcuts` (or your browser's equivalent). Alt+Shift+Up/Down are handled inside pages rather than as browser shortcuts (Chrome allows an extension only four suggested shortcuts), so they can't be changed there.
+Note for Windows: `Alt+Shift` is also Windows' default shortcut for changing keyboard language. If you have more than one input language and it gets in the way, change the extension's shortcuts at `chrome://extensions/shortcuts` (or your browser's equivalent). Alt+Shift+Up/Down are handled inside pages rather than as browser shortcuts (Chrome allows an extension only four suggested shortcuts), so they're changed on the keybinds page instead (see **Keybinds** below).
+
+## Keybinds
+
+**Settings > Keybinds…** opens a page listing every keyboard shortcut. Click **Add key** next to an action and press the combination you want; click × on a key to remove it, **Reset** to go back to an action's default, or **Reset all to defaults**. Changes are saved straight away and apply everywhere, including pages that are already open, and an action can have more than one key.
+
+- **Board**: save (Ctrl+S), close selected tabs (Delete), clear selection (Esc), plus Minimize all, Load all tabs and Pause all media, which have no key until you give them one. Keys without Ctrl/Alt are ignored while you type in a text box.
+- **Any page**: opening the tab switcher (Alt+Shift+Up/Down). These must include Ctrl or Alt, so typing on web pages is never taken over.
+- **Tab switcher**: moving (arrows), switching (Enter) and cancelling (Esc) while it's open.
+- The page warns when a key is used by two actions that can clash, or by a browser shortcut (the browser shortcut wins).
+- The browser shortcuts (Alt+Shift+Q, Alt+Shift+Left/Right, Alt+Shift+Home) are shown too; only the browser can change them, so the page has a button that opens its shortcuts page.
 
 ## Tab icons and previews
 

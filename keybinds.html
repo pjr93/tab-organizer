@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Keybinds · Reflection Board</title>
+    <link rel="icon" href="icon32.png">
+    <link rel="stylesheet" href="main.css">
+    <style>
+        .kb-page {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 8px 24px 48px;
+        }
+
+        .kb-page h2 {
+            margin: 20px 0 4px 0;
+        }
+
+        .kb-intro {
+            color: #aaa;
+            font-size: 14px;
+            margin: 0 0 16px 0;
+        }
+
+        .kb-page h3 {
+            margin: 28px 0 4px 0;
+            font-size: 17px;
+        }
+
+        .kb-scope {
+            color: #888;
+            font-size: 13px;
+            margin: 0 0 8px 0;
+        }
+
+        .kb-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .kb-table td {
+            border-top: 1px solid #333;
+            padding: 8px 6px;
+            vertical-align: top;
+        }
+
+        .kb-table td.kb-label {
+            width: 38%;
+            color: #ddd;
+            padding-top: 12px;
+        }
+
+        .kb-table td.kb-actions {
+            width: 1%;
+            white-space: nowrap;
+            text-align: right;
+        }
+
+        .kb-combos {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            min-height: 30px;
+        }
+
+        .kb-combo {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 4px 3px 10px;
+            background: #222;
+            border: 1px solid #666;
+            border-radius: 6px;
+            font-family: ui-monospace, Consolas, monospace;
+            font-size: 14px;
+        }
+
+        .kb-combo button {
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1;
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+
+        .kb-combo button:hover {
+            background: #b32b2b;
+            color: white;
+        }
+
+        .kb-none {
+            color: #777;
+            font-style: italic;
+            font-size: 14px;
+        }
+
+        .kb-capturing {
+            padding: 3px 10px;
+            border: 2px dashed #2196F3;
+            border-radius: 6px;
+            color: #8ab4f8;
+            font-size: 14px;
+            animation: kbPulse 1s infinite ease-in-out;
+        }
+
+        @keyframes kbPulse {
+            50% { opacity: 0.5; }
+        }
+
+        .kb-warning {
+            color: #f0b46e;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .kb-error {
+            color: #ff8a80;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .kb-actions .state-btn {
+            min-width: 0;
+            margin-left: 4px;
+        }
+
+        .kb-footer {
+            margin-top: 28px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .kb-footer .kb-intro {
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="kb-page">
+        <h2>Keybinds</h2>
+        <p class="kb-intro">Click <b>Add key</b> and press the key combination you want. Changes are saved straight away and apply everywhere, including pages that are already open. An action can have more than one key.</p>
+
+        <div id="kb-sections"></div>
+
+        <h3>Browser shortcuts</h3>
+        <p class="kb-scope">These work anywhere in the browser. Only the browser can change them, on its extension shortcuts page.</p>
+        <table class="kb-table" id="kb-commands"></table>
+        <div class="kb-footer">
+            <button type="button" id="kb-open-shortcuts" class="state-btn">Change browser shortcuts…</button>
+        </div>
+
+        <h3>Mouse</h3>
+        <p class="kb-scope">Fixed; listed for reference.</p>
+        <table class="kb-table" id="kb-mouse"></table>
+
+        <div class="kb-footer">
+            <button type="button" id="kb-reset-all" class="state-btn danger-btn">Reset all to defaults</button>
+            <p class="kb-intro" id="kb-status" aria-live="polite"></p>
+        </div>
+    </div>
+    <script src="keybinds-core.js"></script>
+    <script src="keybinds.js"></script>
+</body>
+
+</html>

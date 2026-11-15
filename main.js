@@ -1348,15 +1348,48 @@ function updateSelectionToolbar() {
     selectionToolbar.style.top = `${Math.max(4, topRect.top + window.scrollY - h - 4)}px`;
 }
 
+/* Board keybinds ----------------------------------------------------- */
+// Keys come from keybinds-core.js and can be changed on the keybinds page
+// (Settings > Keybinds…). Keys without Ctrl/Alt/Meta are ignored while typing
+// in a text box. Only saving works while a dialog is open (it ignores the
+// key itself if a dialog is already up). Actions with a top-bar button press
+// that button, so they behave exactly like clicking it.
+let boardKeybinds = Keybinds.resolve({});
+Keybinds.watch((map) => {
+    boardKeybinds = map;
+    // Hints that name a key (tab hints read boardKeybinds directly, hints.js).
+    const save = Keybinds.describe(map, 'saveSession', '');
+    document.getElementById('internal-save-btn').dataset.hint =
+        'Save every window as an internal save' + (save ? ` (${save})` : '');
+});
+const BOARD_KEYBIND_IDS = Keybinds.idsFor('board');
+const KEYBIND_BUTTONS = {
+    saveSession: 'internal-save-btn',
+    minimizeAll: 'minimize-all-btn',
+    loadAll: 'force-load-btn',
+    pauseAll: 'pause-all-btn',
+};
+
 window.addEventListener('keydown', (e) => {
+    const action = Keybinds.actionFor(e, boardKeybinds, BOARD_KEYBIND_IDS);
+    if (!action) return;
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-    if (document.querySelector('dialog[open]')) return;
-    if (e.key === 'Delete' && selectedTabIds.size) {
+    const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+    if (typing && !Keybinds.hasCommandModifier(Keybinds.comboFromEvent(e))) return;
+    const dialogOpen = !!document.querySelector('dialog[open]');
+    if (dialogOpen && action !== 'saveSession') return;
+
+    if (action === 'closeSelected') {
+        if (!selectedTabIds.size) return;
         e.preventDefault();
         closeSelectedTabs();
-    } else if (e.key === 'Escape' && selectedTabIds.size) {
+    } else if (action === 'clearSelection') {
+        if (!selectedTabIds.size) return;
         clearSelection();
+    } else if (KEYBIND_BUTTONS[action]) {
+        e.preventDefault();
+        if (action === 'saveSession' && dialogOpen) return; // already saving/loading
+        document.getElementById(KEYBIND_BUTTONS[action]).click();
     }
 });
 
@@ -1516,21 +1549,8 @@ addFileInput.addEventListener('change', (e) => {
     e.target.value = '';
 });
 
-// Ctrl+S triggers internal save only
-window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        saveSessionInternal();
-
-        const saveBtn = document.getElementById('internal-save-btn');
-        if (saveBtn) {
-            saveBtn.classList.add('glow');
-            setTimeout(() => {
-                saveBtn.classList.remove('glow');
-            }, 1000); // match animation duration
-        }
-    }
-});
+// Ctrl+S (or whatever "Save session internally" is bound to) is handled with
+// the other board keybinds above.
 
 document.body.addEventListener('click', (e) => {
     if (e.target.classList.contains('state-btn')) {
@@ -1614,6 +1634,21 @@ document.addEventListener('mousedown', (e) => {
 });
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !settingsPanel.hidden) setSettingsOpen(false);
+});
+
+// Settings > Keybinds…: open the keybinds page in a new tab next to the
+// board, or switch to it if it's already open.
+const KEYBINDS_URL = chrome.runtime.getURL('keybinds.html');
+document.getElementById('keybinds-btn').addEventListener('click', async () => {
+    setSettingsOpen(false);
+    const [open] = await chrome.tabs.query({ url: KEYBINDS_URL });
+    if (open) {
+        await chrome.tabs.update(open.id, { active: true });
+        await chrome.windows.update(open.windowId, { focused: true });
+        return;
+    }
+    const current = await chrome.tabs.getCurrent();
+    chrome.tabs.create({ url: KEYBINDS_URL, index: current ? current.index + 1 : undefined });
 });
 
 

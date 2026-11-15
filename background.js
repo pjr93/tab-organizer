@@ -427,7 +427,7 @@ async function showOverlay(tabId, items, cursor) {
     response = await trySend();
   } catch (e) {
     try {
-      await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["switcher-overlay.js"] });
+      await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["keybinds-core.js", "switcher-overlay.js"] });
       response = await trySend();
     } catch (e2) {
       return false; // page can't be scripted

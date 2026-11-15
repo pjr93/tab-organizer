@@ -17,9 +17,16 @@ const DEFAULT_HINT_SECONDS = 4;
 let hintPersistMs = DEFAULT_HINT_SECONDS * 1000;
 let hintsEnabled = true;
 
-const TAB_HINT = 'Tab: Click to select · Ctrl+click to add/remove · Shift+click for a range · ' +
-    'Right-click to go to the tab · Drag to move (off the board for a new window) · ' +
-    'Delete closes selected · Esc clears selection';
+// The keys come from the board's current keybinds (boardKeybinds in main.js).
+function tabHint() {
+    const keys = (id, what) => {
+        const k = Keybinds.describe(boardKeybinds, id, '');
+        return k ? ` · ${k} ${what}` : '';
+    };
+    return 'Tab: Click to select · Ctrl+click to add/remove · Shift+click for a range · ' +
+        'Right-click to go to the tab · Drag to move (off the board for a new window)' +
+        keys('closeSelected', 'closes selected') + keys('clearSelection', 'clears selection');
+}
 
 const hintLine = document.getElementById('hint-line');
 const boardHeader = document.querySelector('.board-header');
@@ -34,7 +41,7 @@ function hintFor(node) {
         if (el.title) el.dataset.hint = el.title;
         el.removeAttribute('title');
     }
-    if (el.classList.contains('grid-item')) return { el, text: TAB_HINT };
+    if (el.classList.contains('grid-item')) return { el, text: tabHint() };
     return el.dataset.hint ? { el, text: el.dataset.hint } : null;
 }
 

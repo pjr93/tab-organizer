@@ -3,16 +3,30 @@
 //
 // Keyboard focus stays in the page, so the overlay responds instantly.
 // - Alt+Shift+Left/Right are browser shortcuts handled by background.js;
-//   Alt+Shift+Up/Down are caught here and forwarded, since Chrome allows only
-//   four suggested extension shortcuts.
+//   Alt+Shift+Up/Down (changeable on the keybinds page) are caught here and
+//   forwarded, since Chrome allows only four suggested extension shortcuts.
 // - While the overlay is shown: arrows move the highlight, Enter switches,
-//   Esc / clicking outside / leaving the page cancels. All key and mouse input
-//   is captured so it doesn't reach the page; the banner says so.
+//   Esc / clicking outside / leaving the page cancels (keys changeable on the
+//   keybinds page). All key and mouse input is captured so it doesn't reach
+//   the page; the banner says so.
+// Keys come from keybinds-core.js (loaded just before this script).
 (() => {
     if (window.__tabSwitcherOverlayLoaded) return;
     window.__tabSwitcherOverlayLoaded = true;
 
     const BOARD_GREEN = 'green'; // same colour as the board's own tile
+
+    // Current keybinds (defaults until storage has been read).
+    let binds = Keybinds.resolve({});
+    Keybinds.watch((map) => { binds = map; });
+    const OPEN_IDS = Keybinds.idsFor('page');
+    const SWITCHER_IDS = Keybinds.idsFor('switcher');
+
+    function hintText() {
+        const d = (id) => Keybinds.describe(binds, id, '—');
+        return `${d('switcherOlder')} / ${d('switcherNewer')} to move · ${d('switcherCommit')} to switch · ` +
+            `${d('switcherCancel')} to cancel · click to pick`;
+    }
 
     let active = false;
     let done = false;
@@ -108,7 +122,7 @@
         banner.append(dot, 'Tab switcher: keyboard input is captured');
         const hint = document.createElement('div');
         hint.className = 'hint';
-        hint.textContent = 'Arrow keys to move · Enter to switch · Esc to cancel · click to pick';
+        hint.textContent = hintText();
         listEl = document.createElement('ul');
 
         items.forEach((item, i) => {
@@ -171,36 +185,33 @@
     }
 
     // ---- input handling (capture phase, registered at document_start) ----
-    function isAltShiftOnly(e) {
-        return e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
-    }
-
     function onKey(e) {
         if (!active) {
-            // Alt+Shift+Up/Down opens the switcher (Left/Right are browser shortcuts).
-            if (e.type === 'keydown' && isAltShiftOnly(e) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            // "Open tab switcher" keys (default Alt+Shift+Up/Down; Left/Right
+            // are browser shortcuts).
+            if (e.type !== 'keydown') return;
+            const action = Keybinds.actionFor(e, binds, OPEN_IDS);
+            if (action) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
-                send({ type: 'switcher_open_request', step: e.key === 'ArrowDown' ? 1 : -1 });
+                send({ type: 'switcher_open_request', step: action === 'switcherOpenOlder' ? 1 : -1 });
             }
             return;
         }
         e.preventDefault();
         e.stopImmediatePropagation();
         if (e.type !== 'keydown') return;
-        switch (e.key) {
-            case 'ArrowLeft':
-            case 'ArrowDown':
+        switch (Keybinds.actionFor(e, binds, SWITCHER_IDS)) {
+            case 'switcherOlder':
                 send({ type: 'switcher_move', step: 1 });
                 break;
-            case 'ArrowRight':
-            case 'ArrowUp':
+            case 'switcherNewer':
                 send({ type: 'switcher_move', step: -1 });
                 break;
-            case 'Enter':
+            case 'switcherCommit':
                 finish('switcher_commit');
                 break;
-            case 'Escape':
+            case 'switcherCancel':
                 finish('switcher_cancel');
                 break;
         }
