@@ -189,20 +189,20 @@ async function runTitleWork() {
 }
 
 async function writeTitleSnapshot() {
-  const { titles = {}, windowOrder = [], minimizedWindows = {} } =
-    await chrome.storage.local.get(["titles", "windowOrder", "minimizedWindows"]);
+  const { titles = {}, windowOrder = [], minimizedWindows = {}, savedWindows = {} } =
+    await chrome.storage.local.get(["titles", "windowOrder", "minimizedWindows", "savedWindows"]);
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
   const rank = id => { const i = windowOrder.indexOf(id); return i === -1 ? Infinity : i; };
   windows.sort((a, b) => rank(a.id) - rank(b.id));
   const titleSnapshot = windows
-    .map(w => ({ title: titles[w.id] || "", minimized: !!minimizedWindows[w.id], urls: windowUrls(w) }))
+    .map(w => ({ title: titles[w.id] || "", minimized: !!minimizedWindows[w.id], savedSig: savedWindows[w.id] || null, urls: windowUrls(w) }))
     .filter(e => e.urls.length);
   await chrome.storage.local.set({ titleSnapshot });
 }
 
 async function matchRestoredWindows(titleMatch) {
-  const { titles = {}, windowOrder = [], minimizedWindows = {} } =
-    await chrome.storage.local.get(["titles", "windowOrder", "minimizedWindows"]);
+  const { titles = {}, windowOrder = [], minimizedWindows = {}, savedWindows = {} } =
+    await chrome.storage.local.get(["titles", "windowOrder", "minimizedWindows", "savedWindows"]);
   const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
   const alreadyMatched = new Set(titleMatch.matched.map(m => m.winId));
 
@@ -225,6 +225,7 @@ async function matchRestoredWindows(titleMatch) {
   const usedWins = new Set(), usedEntries = new Set();
   let titlesChanged = false;
   let minimizedChanged = false;
+  let savedChanged = false;
   for (const { win, i } of pairs) {
     if (usedWins.has(win.id) || usedEntries.has(i)) continue;
     usedWins.add(win.id);
@@ -234,6 +235,8 @@ async function matchRestoredWindows(titleMatch) {
     // Don't overwrite a title the user already typed this session.
     if (entry.title && !titles[win.id]) { titles[win.id] = entry.title; titlesChanged = true; }
     if (entry.minimized === true && !minimizedWindows[win.id]) { minimizedWindows[win.id] = true; minimizedChanged = true; }
+    // What was last saved for it (the board's unsaved marks, unsaved.js).
+    if (entry.savedSig && !savedWindows[win.id]) { savedWindows[win.id] = entry.savedSig; savedChanged = true; }
   }
 
   if (usedEntries.size) {
@@ -250,6 +253,7 @@ async function matchRestoredWindows(titleMatch) {
     const update = { windowOrder: [...matchedIds, ...rest] };
     if (titlesChanged) update.titles = titles;
     if (minimizedChanged) update.minimizedWindows = minimizedWindows;
+    if (savedChanged) update.savedWindows = savedWindows;
     await chrome.storage.local.set(update);
   }
 
@@ -266,7 +270,7 @@ chrome.runtime.onStartup.addListener(async () => {
   if (!titleSnapshot.length) return;
   await chrome.storage.session.set({
     titleMatch: {
-      entries: titleSnapshot.map((e, index) => ({ title: e.title || "", minimized: e.minimized === true, urls: e.urls || [], index })),
+      entries: titleSnapshot.map((e, index) => ({ title: e.title || "", minimized: e.minimized === true, savedSig: e.savedSig || null, urls: e.urls || [], index })),
       matched: [],
       until: Date.now() + TITLE_MATCH_WINDOW_MS,
     },
@@ -283,7 +287,7 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
 
 // A title edited, a window moved or a box minimized on the board: refresh the snapshot.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && (changes.titles || changes.windowOrder || changes.minimizedWindows)) scheduleTitleWork();
+  if (area === "local" && (changes.titles || changes.windowOrder || changes.minimizedWindows || changes.savedWindows)) scheduleTitleWork();
 });
 
 /* ------------------------------------------------------------------ */

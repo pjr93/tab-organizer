@@ -130,6 +130,8 @@ There are two kinds of save states: **internal** and **JSON file**. Both save ev
 - **Upload JSON**: replaces your open tabs with the windows in a saved file.
 - **Add JSON**: opens the windows from a saved file alongside the tabs you already have.
 
+**Unsaved windows**: a window box shows a small `*` in its top right corner when it isn't saved: it was never saved, or its tabs (added, closed, moved, reordered or navigated) or its title have changed since. Saving it internally, downloading it as JSON (on its own, with the whole board, or all of its tabs from the selection toolbar) or loading it from a save clears the mark; undoing the change clears it too. Saving only some of its tabs and autosaves don't count. The mark survives a browser restart along with the window's title.
+
 When loading, the saved windows are created first and only then are your old tabs closed, so a bad file won't wipe your session. Restored tabs are created unloaded: they appear immediately but each page only loads when you first open it.
 
 WARNING: some browser-internal pages (e.g. brave://extensions) can't be reopened by extensions. Any tab that can't be restored is skipped and you'll be told how many; the list is in the console (F12).

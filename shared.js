@@ -52,6 +52,16 @@ function serializeTabGroups(groups, titles, minimized = {}) {
     }).filter(Boolean);
 }
 
+// What a window's save is compared by (unsaved marks, unsaved.js): its title
+// and its tabs' URLs in order, leaving out the board itself. Works on live
+// tabs and on saved ones alike.
+function windowSaveSignature(title, tabs) {
+    const urls = (tabs || [])
+        .filter(t => t && !isBoardTab(t))
+        .map(t => t.url || t.pendingUrl || '');
+    return JSON.stringify([title || '', urls]);
+}
+
 // Tab screenshots for the full preview, kept in IndexedDB (shared by the board
 // and the service worker). Keyed by tab id; each record is
 // { url, blob, width, height, at } where `url` is the address the screenshot

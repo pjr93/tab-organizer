@@ -255,6 +255,7 @@ async function restoreState(saved, { replace = false } = {}) {
     // half-restored session (expires on its own in case this page dies).
     await chrome.storage.session.set({ restoreBusyUntil: Date.now() + 10 * 60 * 1000 });
     const failed = [];
+    const createdWindowIds = [];
     try {
         const boardWindow = await chrome.windows.getCurrent();
         const toClose = replace
@@ -287,6 +288,7 @@ async function restoreState(saved, { replace = false } = {}) {
 
             const results = await runLimited(rest, 6, tab => createUnloadedTab(newWindow.id, tab.url));
             results.forEach((r, i) => { if (!r.ok) failed.push(rest[i].url); });
+            createdWindowIds.push(newWindow.id);
         }
         chrome.storage.local.set({ titles });
 
@@ -296,6 +298,8 @@ async function restoreState(saved, { replace = false } = {}) {
     } finally {
         restoreInProgress = false;
         chrome.storage.session.remove('restoreBusyUntil');
+        // Windows loaded from a save start out saved (unsaved.js).
+        if (createdWindowIds.length) await markLiveWindowsSaved(createdWindowIds);
         syncGroupDataFromBrowser();
     }
 
@@ -306,7 +310,9 @@ async function restoreState(saved, { replace = false } = {}) {
 }
 
 function downloadStateAsFile(groups = groupData) {
-    downloadJson(serializeGroups(groups), 'tab_layout.json');
+    const windows = serializeGroups(groups);
+    downloadJson(windows, 'tab_layout.json');
+    markWindowsSaved(windows); // unsaved.js
 }
 
 // Download a saved layout (or any data) as a .json file.
@@ -375,6 +381,7 @@ function createEditableTitleBox(parentElement, windowId) {
         titles[windowId] = title.value
         console.log(titles[windowId], title.value)
         chrome.storage.local.set({ titles }, () => { });
+        updateUnsavedMarks(); // the title is part of what's saved
     })
     return title;
 }
@@ -386,6 +393,7 @@ function pruneTitles(windows) {
     const live = new Set(windows.map(w => String(w.id)));
     pruneWindowMap('titles', live, () => titles, v => { titles = v; });
     pruneWindowMap('minimizedWindows', live, () => minimizedWindows, v => { minimizedWindows = v; });
+    pruneSavedWindows(live); // unsaved.js
 }
 
 // Prunes the stored copy of a window-id-keyed map rather than our in-memory
@@ -1505,6 +1513,7 @@ function renderBoard() {
 
     boardItems.push(newWindowBtn);
     updateMinimizeAllButton();
+    updateUnsavedMarks(); // unsaved.js
     layoutBoard();
     applyPendingFocus();
     highlightActiveTab()

@@ -740,6 +740,7 @@ async function submitSaveDialog() {
     store.lastSavedId = savedId;
     if (saveDialogState.kind === 'session') store.lastSessionSaveId = savedId;
     await writeSavesStore(store);
+    markWindowsSaved(windows); // unsaved.js
     chrome.storage.local.remove('lastSaveAction').catch(() => { }); // no longer used
     lastSaveFolder = folder;
     saveDialogState.windows = null;
